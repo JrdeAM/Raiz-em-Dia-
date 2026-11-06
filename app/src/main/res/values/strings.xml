@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Skala</string>
+    <string name="slogan">Beleza com hora marcada</string>
+
+    <!-- Campos -->
+    <string name="campo_email">E-mail</string>
+    <string name="campo_email_placeholder">seuemail@exemplo.com</string>
+    <string name="campo_senha">Senha</string>
+    <string name="mostrar_senha">Mostrar senha</string>
+    <string name="ocultar_senha">Ocultar senha</string>
+
+    <!-- Login -->
+    <string name="login_titulo">Que bom te ver</string>
+    <string name="login_subtitulo">Entre para agendar e acompanhar seus horários.</string>
+    <string name="login_senha_placeholder">Digite sua senha</string>
+    <string name="login_esqueci_senha">Esqueci minha senha</string>
+    <string name="login_entrar">Entrar</string>
+    <string name="login_ou">ou</string>
+    <string name="login_com_celular">Entrar com o celular</string>
+    <string name="login_sem_conta">Ainda não tem conta?</string>
+    <string name="login_criar_conta">Criar conta</string>
+
+    <!-- Cadastro -->
+    <string name="cadastro_voltar">Voltar para o login</string>
+    <string name="cadastro_titulo">Criar sua conta</string>
+    <string name="cadastro_subtitulo">Leva menos de um minuto. Depois é só escolher o seu horário.</string>
+    <string name="campo_nome">Nome completo</string>
+    <string name="campo_nome_placeholder">Como podemos te chamar?</string>
+    <string name="campo_celular">Celular (WhatsApp)</string>
+    <string name="campo_celular_placeholder">(00) 00000-0000</string>
+    <string name="cadastro_senha_placeholder">Mínimo de 8 caracteres</string>
+    <string name="campo_confirmar_senha">Confirmar senha</string>
+    <string name="cadastro_confirmar_placeholder">Repita a senha</string>
+    <string name="termos_prefixo">"Li e aceito os "</string>
+    <string name="termos_link">Termos de uso</string>
+    <string name="termos_meio">" e a "</string>
+    <string name="privacidade_link">Política de privacidade</string>
+    <string name="termos_sufixo">.</string>
+    <string name="cadastro_criar">Criar conta</string>
+    <string name="cadastro_ja_tem_conta">Já tem conta?</string>
+    <string name="cadastro_entrar">Entrar</string>
+
+    <!-- Erros de validação -->
+    <string name="erro_email">Informe um e-mail válido</string>
+    <string name="erro_senha_vazia">Informe sua senha</string>
+    <string name="erro_nome">Informe seu nome</string>
+    <string name="erro_celular">Informe um celular com DDD</string>
+    <string name="erro_senha_curta">A senha precisa ter pelo menos 8 caracteres</string>
+    <string name="erro_senha_diferente">As senhas não são iguais</string>
+    <string name="erro_termos">Você precisa aceitar os termos para continuar</string>
+
+    <string name="erro_credenciais">E-mail ou senha incorretos.</string>
+    <string name="erro_email_existente">Este e-mail já tem uma conta. Tente entrar.</string>
+    <string name="erro_generico">Algo deu errado. Tente de novo.</string>
+
+    <!-- Home (provisória) -->
+    <string name="home_ola">Olá, %1$s!</string>
+    <string name="home_conta_criada">Sua conta foi criada. Agora é só escolher o horário.</string>
+    <string name="home_bem_vinda">Que bom te ver de novo.</string>
+    <string name="home_em_construcao">Aqui vão ficar seus agendamentos.</string>
+    <string name="home_sair">Sair</string>
+    <string name="carregando">Carregando</string>
+
+    <string name="aviso_em_breve">Em breve</string>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema da janela; as telas em si usam o SkalaTheme do Compose. -->
+    <style name="Theme.Skala" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/skala_ivory</item>
+    </style>
+</resources>

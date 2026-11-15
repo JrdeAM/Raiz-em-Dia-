@@ -1,0 +1,54 @@
+package br.com.skala.app.data
+
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
+import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.tasks.await
+
+object FirebaseAuthRepository : AuthRepository {
+    private val auth get() = FirebaseAuth.getInstance()
+    private val usuarios get() = FirebaseFirestore.getInstance().collection("usuarios")
+
+    override suspend fun entrar(email: String, senha: String): Result<Usuario> = try {
+        val chave = email.trim().lowercase()
+        val uid = auth.signInWithEmailAndPassword(chave, senha).await().user!!.uid
+        val doc = usuarios.document(uid).get().await()
+        Result.success(
+            Usuario(
+                nome = doc.getString("nome") ?: chave.substringBefore("@"),
+                email = chave,
+                celular = doc.getString("celular") ?: "",
+                ehDona = doc.getBoolean("ehDona") ?: false,
+            ),
+        )
+    } catch (e: FirebaseAuthInvalidCredentialsException) {
+        Result.failure(AuthErro.CredenciaisInvalidas())
+    } catch (e: FirebaseAuthInvalidUserException) {
+        Result.failure(AuthErro.CredenciaisInvalidas())
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    override suspend fun cadastrar(dados: DadosCadastro): Result<Usuario> = try {
+        val chave = dados.email.trim().lowercase()
+        val uid = auth.createUserWithEmailAndPassword(chave, dados.senha).await().user!!.uid
+        val usuario = Usuario(nome = dados.nome, email = chave, celular = dados.celular)
+        usuarios.document(uid).set(
+            mapOf(
+                "nome" to usuario.nome,
+                "email" to usuario.email,
+                "celular" to usuario.celular,
+                "ehDona" to false, // a dona é marcada manualmente no console
+            ),
+        ).await()
+        Result.success(usuario)
+    } catch (e: FirebaseAuthUserCollisionException) {
+        Result.failure(AuthErro.EmailJaCadastrado())
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    override fun sair() = auth.signOut()
+}

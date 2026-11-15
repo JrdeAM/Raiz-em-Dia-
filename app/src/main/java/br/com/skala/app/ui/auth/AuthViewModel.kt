@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import br.com.skala.app.data.FirebaseAuthRepository
 
 data class AuthUiState(
     val carregando: Boolean = false,
@@ -24,7 +25,7 @@ data class AuthUiState(
 
 /** Estado de login/cadastro compartilhado pelas telas. Troque o repositório pelo da API quando ela existir. */
 class AuthViewModel(
-    private val repositorio: AuthRepository = FakeAuthRepository,
+    private val repositorio: AuthRepository = FirebaseAuthRepository,
 ) : ViewModel() {
 
     private val _estado = MutableStateFlow(AuthUiState())
@@ -37,6 +38,7 @@ class AuthViewModel(
     fun limparErro() = _estado.update { it.copy(erro = null) }
 
     fun sair() {
+        repositorio.sair()
         _estado.value = AuthUiState()
     }
 

@@ -27,6 +27,7 @@ sealed class AuthErro : Exception() {
 interface AuthRepository {
     suspend fun entrar(email: String, senha: String): Result<Usuario>
     suspend fun cadastrar(dados: DadosCadastro): Result<Usuario>
+    fun sair() {}   // novo, com implementação padrão vazia: o Fake continua funcionando
 }
 
 /**

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.time.LocalDate
 import java.time.LocalTime
+import br.com.skala.app.data.FirebaseSalaoRepository
 
 /** O que a cliente já escolheu no fluxo Serviços → Sobre seu cabelo → Horário → Confirmar. */
 data class AgendamentoUiState(
@@ -31,7 +32,7 @@ data class AgendamentoUiState(
 )
 
 class AgendamentoViewModel(
-    val repositorio: SalaoRepository = FakeSalaoRepository,
+    val repositorio: SalaoRepository = FirebaseSalaoRepository,
 ) : ViewModel() {
 
     private val _estado = MutableStateFlow(AgendamentoUiState())

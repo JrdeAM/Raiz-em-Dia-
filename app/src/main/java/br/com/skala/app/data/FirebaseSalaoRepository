@@ -1,0 +1,191 @@
+package br.com.skala.app.data
+
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+
+object FirebaseSalaoRepository : SalaoRepository {
+    private const val PASSO_MIN = 30L
+
+    // Copie aqui a mesma lista de serviços do FakeSalaoRepository (os ids precisam ser os mesmos).
+    override val servicos = listOf(
+        Servico("corte", "Corte feminino", 60, "Cabelo", dependeDoCabelo = true),
+        Servico("corte_masculino", "Corte masculino", 40, "Cabelo", dependeDoCabelo = true),
+        Servico("escova", "Escova", 60, "Cabelo", dependeDoCabelo = true),
+        Servico("coloracao", "Coloração", 120, "Cabelo", dependeDoCabelo = true),
+        Servico("hidratacao", "Hidratação", 60, "Cabelo", dependeDoCabelo = true),
+        Servico("sobrancelha", "Design de sobrancelha", 30, "Sobrancelha", dependeDoCabelo = false),
+        Servico("maquiagem", "Maquiagem", 60, "Maquiagem", dependeDoCabelo = false),
+    )
+
+    private val db get() = FirebaseFirestore.getInstance()
+    private val colAgendamentos get() = db.collection("agendamentos")
+    private val colDias get() = db.collection("dias")
+
+    private val _dias = MutableStateFlow<Map<LocalDate, DiaFuncionamento>>(emptyMap())
+    override val dias: StateFlow<Map<LocalDate, DiaFuncionamento>> = _dias.asStateFlow()
+
+    private val _agendamentos = MutableStateFlow<List<Agendamento>>(emptyList())
+    override val agendamentos: StateFlow<List<Agendamento>> = _agendamentos.asStateFlow()
+
+    private var regAgendamentos: ListenerRegistration? = null
+    private var regDias: ListenerRegistration? = null
+
+    init {
+        // Liga os listeners quando alguém loga e desliga quando sai.
+        FirebaseAuth.getInstance().addAuthStateListener { auth ->
+            regAgendamentos?.remove()
+            regDias?.remove()
+            if (auth.currentUser == null) {
+                _agendamentos.value = emptyList()
+                _dias.value = emptyMap()
+            } else {
+                regAgendamentos = colAgendamentos.addSnapshotListener { snap, _ ->
+                    if (snap != null) _agendamentos.value = snap.documents.mapNotNull { it.paraAgendamento() }
+                }
+                regDias = colDias.addSnapshotListener { snap, _ ->
+                    if (snap != null) _dias.value = snap.documents.mapNotNull { it.paraDia() }.associateBy { it.data }
+                }
+            }
+        }
+    }
+
+    override fun dia(data: LocalDate): DiaFuncionamento = _dias.value[data] ?: DiaFuncionamento(data)
+
+    override fun salvarDia(dia: DiaFuncionamento) {
+        _dias.update { it + (dia.data to dia) }
+        colDias.document(dia.data.toString()).set(dia.paraMapa())
+    }
+
+    override fun horariosLivres(data: LocalDate, duracaoMin: Int): List<LocalTime> {
+        val dia = dia(data)
+        val hoje = LocalDate.now()
+        if (dia.status != StatusDia.ABERTO || data.isBefore(hoje)) return emptyList()
+        val agora = LocalDateTime.now()
+        val ocupados = _agendamentos.value
+            .filter { it.data == data && it.status == StatusAgendamento.CONFIRMADO }
+            .map { it.inicio to it.fim }
+        val bloqueados = dia.bloqueios.map { it.inicio to it.fim }
+        val intervalo = dia.intervaloMin.toLong()
+
+        val livres = mutableListOf<LocalTime>()
+        for (faixa in dia.faixas) {
+            var inicio = faixa.inicio
+            while (!inicio.plusMinutes(duracaoMin.toLong()).isAfter(faixa.fim)) {
+                val fim = inicio.plusMinutes(duracaoMin.toLong())
+                val colideAgendamento = ocupados.any { (a, b) ->
+                    inicio.isBefore(b.plusMinutes(intervalo)) && a.isBefore(fim.plusMinutes(intervalo))
+                }
+                val colideBloqueio = bloqueados.any { (a, b) -> inicio.isBefore(b) && a.isBefore(fim) }
+                val jaPassou = data == hoje && !LocalDateTime.of(data, inicio).isAfter(agora)
+                if (!colideAgendamento && !colideBloqueio && !jaPassou) livres += inicio
+                inicio = inicio.plusMinutes(PASSO_MIN)
+                if (inicio == LocalTime.MIDNIGHT) break
+            }
+        }
+        return livres
+    }
+
+    override fun agendar(agendamento: Agendamento): Agendamento {
+        val ref = colAgendamentos.document()
+        val novo = agendamento.copy(id = ref.id)
+        _agendamentos.update { it + novo }
+        ref.set(novo.paraMapa())
+        return novo
+    }
+
+    override fun cancelar(id: String) {
+        _agendamentos.update { lista ->
+            lista.map { if (it.id == id) it.copy(status = StatusAgendamento.CANCELADO) else it }
+        }
+        colAgendamentos.document(id).update("status", StatusAgendamento.CANCELADO.name)
+    }
+
+    // Tabela de preços: preencha igual ao Fake quando a dona definir os valores.
+    private val tabelaPrecos: Map<String, Map<Comprimento, FaixaPreco>> = emptyMap()
+    private val precosFixos: Map<String, FaixaPreco> = emptyMap()
+
+    override fun estimarValor(servico: Servico, cabelo: DadosCabelo?): FaixaPreco? =
+        if (servico.dependeDoCabelo) cabelo?.comprimento?.let { tabelaPrecos[servico.id]?.get(it) }
+        else precosFixos[servico.id]
+
+    // ---------- conversão para o Firestore (LocalDate/LocalTime viram texto) ----------
+
+    private fun Agendamento.paraMapa(): Map<String, Any?> = mapOf(
+        "clienteNome" to clienteNome,
+        "clienteEmail" to clienteEmail,
+        "servicoIds" to servicos.map { it.id },
+        "data" to data.toString(),
+        "inicio" to inicio.toString(),
+        "cabelo" to cabelo?.let {
+            mapOf(
+                "comprimento" to it.comprimento?.name,
+                "tipo" to it.tipo?.name,
+                "volume" to it.volume?.name,
+                "fezQuimica" to it.fezQuimica,
+            )
+        },
+        "observacao" to observacao,
+        "status" to status.name,
+    )
+
+    private inline fun <reified E : Enum<E>> Any?.comoEnum(): E? =
+        (this as? String)?.let { nome -> enumValues<E>().firstOrNull { it.name == nome } }
+
+    private fun DocumentSnapshot.paraAgendamento(): Agendamento? = runCatching {
+        val ids = (get("servicoIds") as? List<*>).orEmpty()
+        val cab = (get("cabelo") as? Map<*, *>)?.let { m ->
+            DadosCabelo(
+                comprimento = m["comprimento"].comoEnum<Comprimento>(),
+                tipo = m["tipo"].comoEnum<TipoCabelo>(),
+                volume = m["volume"].comoEnum<Volume>(),
+                fezQuimica = m["fezQuimica"] as? Boolean,
+            )
+        }
+        Agendamento(
+            id = id,
+            clienteNome = getString("clienteNome") ?: "",
+            clienteEmail = getString("clienteEmail") ?: "",
+            servicos = ids.mapNotNull { sid -> servicos.firstOrNull { it.id == sid } },
+            data = LocalDate.parse(getString("data")!!),
+            inicio = LocalTime.parse(getString("inicio")!!),
+            cabelo = cab,
+            observacao = getString("observacao") ?: "",
+            status = get("status").comoEnum<StatusAgendamento>() ?: StatusAgendamento.CONFIRMADO,
+        )
+    }.getOrNull()
+
+    private fun DiaFuncionamento.paraMapa(): Map<String, Any?> = mapOf(
+        "data" to data.toString(),
+        "status" to status.name,
+        "intervaloMin" to intervaloMin,
+        "faixas" to faixas.map { mapOf("inicio" to it.inicio.toString(), "fim" to it.fim.toString()) },
+        "bloqueios" to bloqueios.map {
+            mapOf("inicio" to it.inicio.toString(), "fim" to it.fim.toString(), "motivo" to it.motivo)
+        },
+    )
+
+    private fun DocumentSnapshot.paraDia(): DiaFuncionamento? = runCatching {
+        DiaFuncionamento(
+            data = LocalDate.parse(getString("data")!!),
+            status = get("status").comoEnum<StatusDia>() ?: StatusDia.A_DEFINIR,
+            faixas = (get("faixas") as? List<*>).orEmpty().mapNotNull { f ->
+                (f as? Map<*, *>)?.let { Faixa(LocalTime.parse(it["inicio"] as String), LocalTime.parse(it["fim"] as String)) }
+            },
+            intervaloMin = (getLong("intervaloMin") ?: 15L).toInt(),
+            bloqueios = (get("bloqueios") as? List<*>).orEmpty().mapNotNull { b ->
+                (b as? Map<*, *>)?.let {
+                    Bloqueio(LocalTime.parse(it["inicio"] as String), LocalTime.parse(it["fim"] as String), it["motivo"] as? String ?: "")
+                }
+            },
+        )
+    }.getOrNull()
+}

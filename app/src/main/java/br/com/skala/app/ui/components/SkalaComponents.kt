@@ -145,12 +145,28 @@ fun BotaoVoltar(onClick: () -> Unit, modifier: Modifier = Modifier, descricao: S
     }
 }
 
-/** Topo das telas do agendamento: voltar + "PASSO X DE 4". */
+/**
+ * Topo das telas do agendamento: voltar + "PASSO X DE 4".
+ * Quando a dona reserva para uma cliente, mostra o nome dela à direita.
+ */
 @Composable
-fun CabecalhoPasso(passo: Int, total: Int, onVoltar: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+fun CabecalhoPasso(passo: Int, total: Int, onVoltar: () -> Unit, paraCliente: String? = null) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BotaoVoltar(onClick = onVoltar)
         Text("PASSO $passo DE $total", fontSize = 12.sp, fontWeight = FontWeight.Medium, letterSpacing = 2.sp, color = SkalaColors.Muted)
+        if (paraCliente != null) {
+            Spacer(Modifier.weight(1f))
+            Surface(shape = PillShape, color = SkalaColors.Blush) {
+                Text(
+                    "Para: $paraCliente",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = SkalaColors.Wine,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
     }
 }
 

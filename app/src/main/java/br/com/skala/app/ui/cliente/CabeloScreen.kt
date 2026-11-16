@@ -1,7 +1,9 @@
 package br.com.skala.app.ui.cliente
 
+import androidx.compose.ui.tooling.preview.Preview
+import br.com.skala.app.ui.theme.SkalaTheme
+import br.com.skala.app.data.FakeSalaoRepository
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,10 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -42,8 +41,8 @@ import br.com.skala.app.data.Comprimento
 import br.com.skala.app.data.DadosCabelo
 import br.com.skala.app.data.Servico
 import br.com.skala.app.data.TipoCabelo
-import br.com.skala.app.data.Volume
 import br.com.skala.app.ui.components.CabecalhoPasso
+import br.com.skala.app.ui.components.IlustracaoComprimento
 import br.com.skala.app.ui.components.OpcaoPilula
 import br.com.skala.app.ui.components.PrimaryButton
 import br.com.skala.app.ui.components.RotuloSecao
@@ -51,27 +50,30 @@ import br.com.skala.app.ui.components.TituloDaTela
 import br.com.skala.app.ui.theme.SkalaColors
 import br.com.skala.app.ui.theme.TituloSecao
 
-/** Formulário obrigatório quando há serviço de cabelo: o valor depende do comprimento e do tipo. */
+/** Formulário obrigatório quando há serviço de cabelo: o tempo depende do comprimento e do tipo. */
 @Composable
 fun CabeloScreen(
-    /** Só os serviços marcados que dependem do cabelo (os outros têm preço fixo). */
+    /** Só os serviços marcados que dependem do cabelo. */
     servicosDeCabelo: List<Servico>,
     cabelo: DadosCabelo,
-    valorEstimado: String?,
+    /** Duração estimada de todos os serviços marcados, ex.: "2h". */
+    tempoEstimado: String,
     onAlterar: (DadosCabelo) -> Unit,
     onVoltar: () -> Unit,
     onContinuar: () -> Unit,
+    /** Nome da cliente quando é a dona reservando. */
+    paraCliente: String? = null,
 ) {
     Column(Modifier.fillMaxSize().background(SkalaColors.Ivory).padding(horizontal = 24.dp, vertical = 20.dp)) {
-        CabecalhoPasso(passo = 2, total = 4, onVoltar = onVoltar)
+        CabecalhoPasso(passo = 2, total = 4, onVoltar = onVoltar, paraCliente = paraCliente)
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column {
-                TituloDaTela("Conte sobre seu cabelo")
+                TituloDaTela(if (paraCliente != null) "Sobre o cabelo da cliente" else "Conte sobre seu cabelo")
                 Text(
-                    "O valor de ${servicosDeCabelo.joinToString(" e ") { it.nome.lowercase() }} depende do comprimento e do tipo do seu cabelo.",
+                    "A duração de ${servicosDeCabelo.joinToString(" e ") { it.nome.lowercase() }} depende do comprimento e do tipo ${if (paraCliente != null) "do cabelo dela" else "do seu cabelo"}.",
                     fontSize = 13.sp,
                     color = SkalaColors.Muted,
                 )
@@ -90,7 +92,7 @@ fun CabeloScreen(
                             modifier = Modifier.weight(1f).heightIn(min = 58.dp).semantics { role = Role.RadioButton; selected = sel },
                         ) {
                             Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                DesenhoComprimento(c)
+                                IlustracaoComprimento(c, selecionado = sel)
                                 Spacer(Modifier.width(10.dp))
                                 Column {
                                     Text(c.rotulo, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = SkalaColors.Wine)
@@ -108,13 +110,7 @@ fun CabeloScreen(
                 onAlterar(cabelo.copy(tipo = if (cabelo.tipo == t) null else t))
             }
 
-            RotuloSecao("Volume")
-            LinhaOpcoes(Volume.entries.map { it.rotulo }, cabelo.volume?.rotulo) { r ->
-                val v = Volume.entries.first { it.rotulo == r }
-                onAlterar(cabelo.copy(volume = if (cabelo.volume == v) null else v))
-            }
-
-            RotuloSecao("Fez química nos últimos 6 meses?")
+            RotuloSecao("Fez química nos últimos 6 meses? *")
             LinhaOpcoes(listOf("Sim", "Não"), cabelo.fezQuimica?.let { if (it) "Sim" else "Não" }) { r ->
                 val v = r == "Sim"
                 onAlterar(cabelo.copy(fezQuimica = if (cabelo.fezQuimica == v) null else v))
@@ -133,36 +129,37 @@ fun CabeloScreen(
                 Text("Enviar foto do cabelo (opcional)", fontSize = 13.sp)
             }
 
-            val completo = cabelo.completo
+            // O tempo aparece assim que o comprimento é marcado e se atualiza a cada resposta
+            val temTempo = cabelo.comprimento != null
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(if (completo) SkalaColors.Wine else SkalaColors.Disabled, RoundedCornerShape(18.dp))
+                    .background(if (temTempo) SkalaColors.Wine else SkalaColors.Disabled, RoundedCornerShape(18.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "TOTAL APROXIMADO",
+                        "TEMPO ESTIMADO",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         letterSpacing = 1.5.sp,
-                        color = if (completo) SkalaColors.OnWineMuted else SkalaColors.Label,
+                        color = if (temTempo) SkalaColors.OnWineMuted else SkalaColors.Label,
                     )
                     Text(
-                        if (completo) "Confirmado no salão após o procedimento" else "Escolha comprimento e tipo",
+                        when {
+                            !temTempo -> "Marque o comprimento para ver o tempo"
+                            cabelo.tipo == null -> "Marque o tipo para um tempo mais preciso"
+                            else -> "Pode variar após a avaliação no salão"
+                        },
                         fontSize = 12.sp,
-                        color = if (completo) SkalaColors.OnWineMuted else SkalaColors.Muted,
+                        color = if (temTempo) SkalaColors.OnWineMuted else SkalaColors.Muted,
                     )
                 }
                 Text(
-                    when {
-                        !completo -> "—"
-                        valorEstimado != null -> valorEstimado
-                        else -> "a combinar"
-                    },
+                    if (temTempo) tempoEstimado else "—",
                     style = TituloSecao,
-                    color = if (completo) Color.White else SkalaColors.Muted,
+                    color = if (temTempo) Color.White else SkalaColors.Muted,
                 )
             }
         }
@@ -184,22 +181,18 @@ private fun LinhaOpcoes(opcoes: List<String>, selecionada: String?, onEscolher: 
     }
 }
 
-/** Cabeça com duas linhas descendo até a altura do comprimento escolhido. */
+// ---------- previews (dados de teste do FakeSalaoRepository) ----------
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Sobre seu cabelo")
 @Composable
-private fun DesenhoComprimento(c: Comprimento) {
-    val fim = when (c) {
-        Comprimento.CURTO -> 0.47f
-        Comprimento.MEDIO -> 0.63f
-        Comprimento.LONGO -> 0.8f
-        Comprimento.EXTRA_LONGO -> 0.94f
-    }
-    Canvas(Modifier.size(width = 22.dp, height = 30.dp)) {
-        val cor = SkalaColors.Rose
-        val r = size.width * 0.23f
-        drawCircle(cor, radius = r, center = Offset(size.width / 2, r + 2f), style = Stroke(width = 1.4.dp.toPx()))
-        val y0 = size.height * 0.3f
-        listOf(size.width * 0.23f, size.width * 0.77f).forEach { x ->
-            drawLine(cor, Offset(x, y0), Offset(x, size.height * fim), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
-        }
+private fun CabeloScreenPreview() {
+    SkalaTheme {
+        CabeloScreen(
+            servicosDeCabelo = FakeSalaoRepository.servicos.filter { it.dependeDoCabelo }.take(2),
+            cabelo = DadosCabelo(),
+            tempoEstimado = "2h",
+            onAlterar = {},
+            onVoltar = {},
+            onContinuar = {},
+        )
     }
 }

@@ -1,5 +1,8 @@
 package br.com.skala.app.ui.cliente
 
+import androidx.compose.ui.tooling.preview.Preview
+import br.com.skala.app.ui.theme.SkalaTheme
+import br.com.skala.app.data.FakeSalaoRepository
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -159,5 +162,19 @@ private fun BotaoContorno(texto: String, modifier: Modifier, cor: Color = SkalaC
         colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White, contentColor = cor),
     ) {
         Text(texto, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+// ---------- previews (dados de teste do FakeSalaoRepository) ----------
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Meus horários")
+@Composable
+private fun AgendamentosScreenPreview() {
+    SkalaTheme {
+        AgendamentosScreen(
+            agendamentos = FakeSalaoRepository.agendamentos.value.filter { it.clienteEmail == "cliente@skala.com" },
+            onRemarcar = {},
+            onCancelar = {},
+            onAgendarDeNovo = {},
+        )
     }
 }

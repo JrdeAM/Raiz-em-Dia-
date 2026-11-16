@@ -30,13 +30,27 @@ class AuthViewModel(
     private val _estado = MutableStateFlow(AuthUiState())
     val estado: StateFlow<AuthUiState> = _estado.asStateFlow()
 
+    init {
+        // Quem já estava logado entra direto ao abrir o app
+        repositorio.usuarioLogado()?.let { usuario -> _estado.value = AuthUiState(usuario = usuario) }
+    }
+
     fun entrar(email: String, senha: String) = executar(contaNova = false) { repositorio.entrar(email, senha) }
 
     fun cadastrar(dados: DadosCadastro) = executar(contaNova = true) { repositorio.cadastrar(dados) }
 
+    fun atualizarDados(nome: String, celular: String) {
+        val atual = _estado.value.usuario ?: return
+        viewModelScope.launch {
+            repositorio.atualizar(atual.copy(nome = nome, celular = celular))
+                .onSuccess { usuario -> _estado.update { it.copy(usuario = usuario) } }
+        }
+    }
+
     fun limparErro() = _estado.update { it.copy(erro = null) }
 
     fun sair() {
+        repositorio.sair()
         _estado.value = AuthUiState()
     }
 

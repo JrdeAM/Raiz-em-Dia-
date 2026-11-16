@@ -1,5 +1,10 @@
 package br.com.skala.app.ui.cliente
 
+import androidx.compose.ui.tooling.preview.Preview
+import br.com.skala.app.ui.theme.SkalaTheme
+import br.com.skala.app.data.FakeSalaoRepository
+import br.com.skala.app.data.Comprimento
+import br.com.skala.app.data.TipoCabelo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,9 +32,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.skala.app.data.DadosCabelo
-import br.com.skala.app.data.FaixaPreco
 import br.com.skala.app.data.Servico
-import br.com.skala.app.data.duracaoTotalMin
+import br.com.skala.app.data.duracaoPara
 import br.com.skala.app.data.temServicoDeCabelo
 import br.com.skala.app.data.textoDuracao
 import br.com.skala.app.data.titulo
@@ -52,8 +56,6 @@ fun ConfirmarScreen(
     data: LocalDate,
     hora: LocalTime,
     cabelo: DadosCabelo,
-    valorDe: (Servico) -> FaixaPreco?,
-    valorTotal: FaixaPreco?,
     observacao: String,
     passo: Int,
     totalPassos: Int,
@@ -63,16 +65,24 @@ fun ConfirmarScreen(
     onAlterarHorario: () -> Unit,
     onVoltar: () -> Unit,
     onConfirmar: () -> Unit,
+    /** Nome da cliente quando é a dona reservando. */
+    paraCliente: String? = null,
 ) {
-    val minutos = servicos.duracaoTotalMin
+    val minutos = servicos.duracaoPara(cabelo)
     val fim = hora.plusMinutes(minutos.toLong())
     Column(Modifier.fillMaxSize().background(SkalaColors.Ivory).padding(horizontal = 24.dp, vertical = 20.dp)) {
-        CabecalhoPasso(passo = passo, total = totalPassos, onVoltar = onVoltar)
+        CabecalhoPasso(passo = passo, total = totalPassos, onVoltar = onVoltar, paraCliente = paraCliente)
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            TituloDaTela(if (remarcando) "Confira o novo horário" else "Confira seu horário")
+            TituloDaTela(
+                when {
+                    paraCliente != null -> "Horário de $paraCliente"
+                    remarcando -> "Confira o novo horário"
+                    else -> "Confira seu horário"
+                },
+            )
 
             Cartao(Modifier.fillMaxWidth()) {
                 Row(
@@ -91,7 +101,7 @@ fun ConfirmarScreen(
                     LinhaResumo("Horário", "${hora.texto()} às ${fim.texto()} (${textoDuracao(minutos)})")
                     if (servicos.temServicoDeCabelo) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Seu cabelo", fontSize = 14.sp, color = SkalaColors.Muted, modifier = Modifier.weight(1f))
+                            Text(if (paraCliente != null) "Cabelo" else "Seu cabelo", fontSize = 14.sp, color = SkalaColors.Muted, modifier = Modifier.weight(1f))
                             TextButton(onClick = onEditarCabelo) {
                                 Text(cabelo.resumo, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = SkalaColors.Wine)
                                 Spacer(Modifier.width(6.dp))
@@ -100,19 +110,16 @@ fun ConfirmarScreen(
                         }
                         HorizontalDivider(color = SkalaColors.Divider)
                     }
-                    // Valor aproximado de cada serviço e a soma
-                    Column(Modifier.padding(top = 12.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Serviços",
+                        fontSize = 14.sp,
+                        color = SkalaColors.Muted,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Column(Modifier.padding(top = 6.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         servicos.forEach { s ->
-                            Row(Modifier.fillMaxWidth()) {
-                                Text(s.nome, fontSize = 14.sp, color = SkalaColors.Muted, modifier = Modifier.weight(1f))
-                                Text(valorDe(s)?.let { "aprox. ${it.texto}" } ?: "a combinar", fontSize = 14.sp, color = SkalaColors.Wine)
-                            }
+                            Text(s.nome, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = SkalaColors.Wine)
                         }
-                    }
-                    HorizontalDivider(color = SkalaColors.Border, modifier = Modifier.padding(top = 6.dp))
-                    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Total aproximado", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = SkalaColors.Wine, modifier = Modifier.weight(1f))
-                        Text(valorTotal?.texto ?: "a combinar", style = TituloSecao.copy(fontSize = 20.sp), color = SkalaColors.Wine)
                     }
                 }
             }
@@ -131,7 +138,7 @@ fun ConfirmarScreen(
                     Icon(Icons.Outlined.Info, contentDescription = null, tint = SkalaColors.Rose, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        "Os valores são aproximados. O valor final é sempre confirmado no salão, após o procedimento. " +
+                        "O valor é informado no salão, após a avaliação e a finalização do serviço. " +
                             "Cancelamento ou remarcação sem custo até [X] horas antes.",
                         fontSize = 13.sp,
                         lineHeight = 19.sp,
@@ -141,7 +148,14 @@ fun ConfirmarScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
-        PrimaryButton(text = if (remarcando) "Confirmar novo horário" else "Confirmar agendamento", onClick = onConfirmar)
+        PrimaryButton(
+            text = when {
+                paraCliente != null -> "Reservar horário"
+                remarcando -> "Confirmar novo horário"
+                else -> "Confirmar agendamento"
+            },
+            onClick = onConfirmar,
+        )
         TextButton(onClick = onAlterarHorario, modifier = Modifier.fillMaxWidth()) {
             Text("Alterar horário", color = SkalaColors.RoseLink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
@@ -155,4 +169,27 @@ private fun LinhaResumo(rotulo: String, valor: String) {
         Text(valor, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = SkalaColors.Wine)
     }
     HorizontalDivider(color = SkalaColors.Divider)
+}
+
+// ---------- previews (dados de teste do FakeSalaoRepository) ----------
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Confirmar")
+@Composable
+private fun ConfirmarScreenPreview() {
+    SkalaTheme {
+        ConfirmarScreen(
+            servicos = FakeSalaoRepository.servicos.filter { it.id == "escova" || it.id == "hidratacao" },
+            data = LocalDate.now().plusDays(1),
+            hora = LocalTime.of(10, 0),
+            cabelo = DadosCabelo(Comprimento.LONGO, TipoCabelo.ONDULADO),
+            observacao = "",
+            passo = 4,
+            totalPassos = 4,
+            remarcando = false,
+            onObservacao = {},
+            onEditarCabelo = {},
+            onAlterarHorario = {},
+            onVoltar = {},
+            onConfirmar = {},
+        )
+    }
 }

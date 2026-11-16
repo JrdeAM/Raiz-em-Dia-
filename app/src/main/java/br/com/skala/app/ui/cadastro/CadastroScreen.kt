@@ -120,11 +120,13 @@ fun CadastroScreen(
         )
 
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            // Altura visível da tela: o conteúdo ocupa pelo menos isso e rola quando o teclado abre
+            val alturaTela = maxHeight
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .heightIn(min = maxHeight)
+                    .heightIn(min = alturaTela)
                     .padding(start = 28.dp, end = 28.dp, top = 16.dp, bottom = 16.dp),
             ) {
                 TopBar(onVoltar = onVoltar)

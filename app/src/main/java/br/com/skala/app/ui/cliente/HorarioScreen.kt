@@ -1,5 +1,8 @@
 package br.com.skala.app.ui.cliente
 
+import androidx.compose.ui.tooling.preview.Preview
+import br.com.skala.app.ui.theme.SkalaTheme
+import br.com.skala.app.data.FakeSalaoRepository
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -67,6 +70,8 @@ fun HorarioScreen(
     onEscolherHora: (LocalTime) -> Unit,
     onVoltar: () -> Unit,
     onContinuar: () -> Unit,
+    /** Nome da cliente quando é a dona reservando. */
+    paraCliente: String? = null,
 ) {
     val hoje = LocalDate.now()
     // Semana mostrada na faixa de dias (começa hoje; dá para avançar)
@@ -81,7 +86,7 @@ fun HorarioScreen(
     val livres = dia?.let(horariosLivres).orEmpty()
 
     Column(Modifier.fillMaxSize().background(SkalaColors.Ivory).padding(horizontal = 24.dp, vertical = 20.dp)) {
-        CabecalhoPasso(passo = passo, total = totalPassos, onVoltar = onVoltar)
+        CabecalhoPasso(passo = passo, total = totalPassos, onVoltar = onVoltar, paraCliente = paraCliente)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 16.dp)) {
             TituloDaTela("Escolha o horário")
             Text(resumoServicos, fontSize = 14.sp, color = SkalaColors.Muted)
@@ -211,5 +216,26 @@ private fun AvisoSemHorario(titulo: String, texto: String) {
     ) {
         Text(titulo, style = TituloTela.copy(fontSize = 22.sp), color = SkalaColors.Wine, textAlign = TextAlign.Center)
         Text(texto, fontSize = 14.sp, color = SkalaColors.Muted, textAlign = TextAlign.Center)
+    }
+}
+
+// ---------- previews (dados de teste do FakeSalaoRepository) ----------
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Escolher horário")
+@Composable
+private fun HorarioScreenPreview() {
+    SkalaTheme {
+        HorarioScreen(
+            resumoServicos = "Escova · 1h",
+            passo = 3,
+            totalPassos = 4,
+            dataSelecionada = null,
+            horaSelecionada = null,
+            statusDia = { FakeSalaoRepository.dia(it).status },
+            horariosLivres = { FakeSalaoRepository.horariosLivres(it, 60) },
+            onEscolherData = {},
+            onEscolherHora = {},
+            onVoltar = {},
+            onContinuar = {},
+        )
     }
 }

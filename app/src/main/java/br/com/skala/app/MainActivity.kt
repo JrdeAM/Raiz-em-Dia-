@@ -1,11 +1,17 @@
 package br.com.skala.app
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
@@ -20,9 +26,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavBackStackEntry
@@ -31,9 +41,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import br.com.skala.app.avisos.AvisosDoApp
+import br.com.skala.app.data.Agendamento
+import br.com.skala.app.data.FakeAuthRepository
+import br.com.skala.app.data.FakeSalaoRepository
+import br.com.skala.app.data.Cliente
+import br.com.skala.app.data.ClienteJaCadastrada
 import br.com.skala.app.data.DiaFuncionamento
+import br.com.skala.app.data.agendamentosForaDoHorario
 import br.com.skala.app.data.StatusDia
-import br.com.skala.app.data.duracaoTotalMin
 import br.com.skala.app.data.temServicoDeCabelo
 import br.com.skala.app.data.textoDuracao
 import br.com.skala.app.data.titulo
@@ -45,9 +61,14 @@ import br.com.skala.app.ui.cliente.CabeloScreen
 import br.com.skala.app.ui.cliente.ConfirmarScreen
 import br.com.skala.app.ui.cliente.HorarioScreen
 import br.com.skala.app.ui.cliente.InicioScreen
+import br.com.skala.app.ui.cliente.MeusDadosScreen
 import br.com.skala.app.ui.cliente.PerfilScreen
 import br.com.skala.app.ui.cliente.ServicosScreen
-import br.com.skala.app.ui.dona.AgendaDiaScreen
+import br.com.skala.app.ui.dona.AgendaScreen
+import br.com.skala.app.ui.dona.AvisoConflitoDialog
+import br.com.skala.app.ui.dona.ClientesScreen
+import br.com.skala.app.ui.dona.NovaClienteScreen
+import br.com.skala.app.ui.dona.formatarCelular
 import br.com.skala.app.ui.dona.EditarDiaScreen
 import br.com.skala.app.ui.dona.HorariosScreen
 import br.com.skala.app.ui.login.LoginScreen
@@ -60,8 +81,16 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 
 class MainActivity : ComponentActivity() {
+    /** true quando o app foi aberto tocando num lembrete: vai direto para Meus agendamentos. */
+    private var abrirAgendamentos by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Lê os dados salvos no celular antes de montar as telas
+        FakeAuthRepository.iniciar(this)
+        FakeSalaoRepository.iniciar(this)
+        AvisosDoApp.iniciar(this)
+        if (savedInstanceState == null) lerIntent(intent)
         // O app é sempre claro, então os ícones da barra de status ficam escuros.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
@@ -69,9 +98,25 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             SkalaTheme {
-                SkalaApp()
+                SkalaApp(
+                    abrirAgendamentos = abrirAgendamentos,
+                    onAgendamentosAbertos = { abrirAgendamentos = false },
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        lerIntent(intent)
+    }
+
+    private fun lerIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_ABRIR_AGENDAMENTOS, false) == true) abrirAgendamentos = true
+    }
+
+    companion object {
+        const val EXTRA_ABRIR_AGENDAMENTOS = "abrir_agendamentos"
     }
 }
 
@@ -112,8 +157,13 @@ private fun NavHostController.irParaAba(rota: String, inicio: String) {
     }
 }
 
+/** Mudança de horário esperando a dona confirmar, porque deixa clientes agendadas fora do expediente. */
+private class MudancaPendente(val conflitos: List<Agendamento>, val salvar: () -> Unit)
+
 @Composable
 fun SkalaApp(
+    abrirAgendamentos: Boolean = false,
+    onAgendamentosAbertos: () -> Unit = {},
     authViewModel: AuthViewModel = viewModel(),
     agendamentoViewModel: AgendamentoViewModel = viewModel(),
 ) {
@@ -123,6 +173,9 @@ fun SkalaApp(
     val repositorio = agendamentoViewModel.repositorio
     val dias by repositorio.dias.collectAsStateWithLifecycle()
     val agendamentos by repositorio.agendamentos.collectAsStateWithLifecycle()
+    val dadosSalao by repositorio.dadosSalao.collectAsStateWithLifecycle()
+    val clientes by repositorio.clientes.collectAsStateWithLifecycle()
+    val avisosDona by repositorio.avisosDona.collectAsStateWithLifecycle()
     val rotaAtual = nav.currentBackStackEntryAsState().value?.destination?.route
     val context = LocalContext.current
     val erro = auth.erro?.let { stringResource(it) }
@@ -130,23 +183,70 @@ fun SkalaApp(
 
     fun aviso(texto: String) = Toast.makeText(context, texto, Toast.LENGTH_SHORT).show()
     fun dia(data: LocalDate) = dias[data] ?: DiaFuncionamento(data)
-    fun repetirNasProximasSemanas(base: DiaFuncionamento) {
-        (1L..4L).forEach { semana -> repositorio.salvarDia(base.copy(data = base.data.plusWeeks(semana))) }
+    fun proximasSemanas(base: DiaFuncionamento) = (1L..4L).map { base.copy(data = base.data.plusWeeks(it)) }
+
+    // Android 13+: a permissão de notificação é pedida quando a cliente confirma o primeiro horário.
+    val pedirPermissaoNotificacao = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    fun pedirNotificacoesSePreciso() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) pedirPermissaoNotificacao.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    var mudancaPendente by remember { mutableStateOf<MudancaPendente?>(null) }
+    var diaCopiado by remember { mutableStateOf<DiaFuncionamento?>(null) }
+    var erroNovaCliente by remember { mutableStateOf<String?>(null) }
+    // Quando a dona está reservando para uma cliente, o fluxo de agendamento volta para o painel dela.
+    val donaReservando = usuario?.ehDona == true
+    val nomeParaCliente = fluxo.paraCliente?.nome.takeIf { donaReservando }
+
+    /** A dona escolhe a cliente e entra no mesmo fluxo de agendamento da cliente. */
+    fun reservarPara(cliente: Cliente) {
+        agendamentoViewModel.iniciarParaCliente(cliente)
+        nav.navigate(Rotas.SERVICOS)
+    }
+
+    /** Salva os dias; se alguma cliente já agendada ficar com o salão fechado, pergunta antes. */
+    fun salvarDias(novos: List<DiaFuncionamento>, depois: () -> Unit) {
+        val salvar = {
+            novos.forEach(repositorio::salvarDia)
+            depois()
+        }
+        val conflitos = novos.flatMap { it.agendamentosForaDoHorario(agendamentos) }
+        if (conflitos.isEmpty()) salvar() else mudancaPendente = MudancaPendente(conflitos, salvar)
     }
 
     // Login ou cadastro deram certo: a dona vai para o painel, a cliente para o Início.
     LaunchedEffect(usuario) {
         val rota = nav.currentDestination?.route
+        if (usuario != null && !usuario.ehDona) {
+            repositorio.registrarClienteDoApp(Cliente(usuario.nome, usuario.celular, usuario.email))
+        }
         if (usuario != null && (rota == Rotas.LOGIN || rota == Rotas.CADASTRO)) {
             nav.irLimpandoPilha(if (usuario.ehDona) Rotas.DONA_AGENDA else Rotas.INICIO)
         }
+    }
+
+    // Cliente logada: os horários dela que ainda não têm lembrete neste celular (como os que a
+    // dona marcou por ela) ganham as notificações.
+    LaunchedEffect(usuario, agendamentos, dadosSalao) {
+        if (usuario != null && !usuario.ehDona) {
+            AvisosDoApp.sincronizarCliente(Cliente(usuario.nome, usuario.celular, usuario.email), agendamentos, dadosSalao)
+        }
+    }
+
+    // Tocou num lembrete: com a cliente logada, abre Meus agendamentos (se não, espera o login).
+    LaunchedEffect(abrirAgendamentos, usuario) {
+        if (!abrirAgendamentos || usuario == null) return@LaunchedEffect
+        if (!usuario.ehDona) nav.irParaAba(Rotas.AGENDAMENTOS, Rotas.INICIO)
+        onAgendamentosAbertos()
     }
 
     Scaffold(
         containerColor = br.com.skala.app.ui.theme.SkalaColors.Ivory,
         bottomBar = {
             when (rotaAtual) {
-                in itensCliente.map { it.rota } -> BarraInferior(itensCliente, rotaAtual) { rota ->
+                in itensCliente.map { it.rota }.takeIf { !donaReservando }.orEmpty() -> BarraInferior(itensCliente, rotaAtual) { rota ->
                     if (rota == Rotas.SERVICOS) agendamentoViewModel.iniciar()
                     nav.irParaAba(rota, Rotas.INICIO)
                 }
@@ -198,7 +298,7 @@ fun SkalaApp(
                 val u = usuario ?: return@composable
                 val agora = LocalDateTime.now()
                 val proximo = agendamentos
-                    .filter { it.clienteEmail == u.email && it.status == br.com.skala.app.data.StatusAgendamento.CONFIRMADO }
+                    .filter { it.eDe(Cliente(u.nome, u.celular, u.email)) && it.status == br.com.skala.app.data.StatusAgendamento.CONFIRMADO }
                     .filter { LocalDateTime.of(it.data, it.inicio).isAfter(agora) }
                     .minByOrNull { LocalDateTime.of(it.data, it.inicio) }
                 InicioScreen(
@@ -221,16 +321,14 @@ fun SkalaApp(
                     servicos = repositorio.servicos,
                     categoriaInicial = fluxo.categoria,
                     selecionadosIniciais = fluxo.servicos.map { it.id },
-                    precoFixo = { repositorio.estimarValor(it, null) },
-                    // Antes do formulário do cabelo, só dá para somar se nenhum serviço depender dele
-                    totalAproximado = { marcados ->
-                        if (marcados.temServicoDeCabelo) null else repositorio.estimarTotal(marcados, null)
+                    onVoltar = {
+                        if (donaReservando) nav.popBackStack() else nav.irParaAba(Rotas.INICIO, Rotas.INICIO)
                     },
-                    onVoltar = { nav.irParaAba(Rotas.INICIO, Rotas.INICIO) },
                     onContinuar = { marcados ->
                         agendamentoViewModel.escolherServicos(marcados)
                         nav.navigate(if (marcados.temServicoDeCabelo) Rotas.CABELO else Rotas.HORARIO)
                     },
+                    paraCliente = nomeParaCliente,
                 )
             }
             composable(Rotas.CABELO) {
@@ -239,17 +337,18 @@ fun SkalaApp(
                 CabeloScreen(
                     servicosDeCabelo = deCabelo,
                     cabelo = fluxo.cabelo,
-                    valorEstimado = agendamentoViewModel.valorTotal()?.texto,
+                    tempoEstimado = textoDuracao(fluxo.duracaoMin),
                     onAlterar = agendamentoViewModel::atualizarCabelo,
                     onVoltar = { nav.popBackStack() },
                     onContinuar = { nav.navigate(Rotas.HORARIO) },
+                    paraCliente = nomeParaCliente,
                 )
             }
             composable(Rotas.HORARIO) {
                 val servicos = fluxo.servicos
                 if (servicos.isEmpty()) return@composable
                 val comCabelo = servicos.temServicoDeCabelo
-                val minutos = servicos.duracaoTotalMin
+                val minutos = fluxo.duracaoMin
                 HorarioScreen(
                     resumoServicos = "${servicos.titulo} · ${textoDuracao(minutos)}",
                     passo = if (comCabelo) 3 else 2,
@@ -258,11 +357,12 @@ fun SkalaApp(
                     horaSelecionada = fluxo.hora,
                     // ler `dias` e `agendamentos` aqui faz a tela atualizar quando a dona muda a agenda
                     statusDia = { d -> dia(d).status },
-                    horariosLivres = { d -> agendamentos.size; repositorio.horariosLivres(d, minutos) },
+                    horariosLivres = { d -> agendamentos.size; repositorio.horariosLivres(d, minutos, fluxo.remarcandoId) },
                     onEscolherData = agendamentoViewModel::escolherData,
                     onEscolherHora = agendamentoViewModel::escolherHora,
                     onVoltar = { nav.popBackStack() },
                     onContinuar = { nav.navigate(Rotas.CONFIRMAR) },
+                    paraCliente = nomeParaCliente,
                 )
             }
             composable(Rotas.CONFIRMAR) {
@@ -270,6 +370,10 @@ fun SkalaApp(
                 val data = fluxo.data
                 val hora = fluxo.hora
                 val u = usuario
+                // Se o cabelo foi editado e o horário deixou de caber, volta para escolher outro
+                if (servicos.isNotEmpty() && data != null && hora == null) {
+                    LaunchedEffect(Unit) { nav.popBackStack(Rotas.HORARIO, inclusive = false) }
+                }
                 if (servicos.isEmpty() || data == null || hora == null || u == null) return@composable
                 val comCabelo = servicos.temServicoDeCabelo
                 ConfirmarScreen(
@@ -277,8 +381,6 @@ fun SkalaApp(
                     data = data,
                     hora = hora,
                     cabelo = fluxo.cabelo,
-                    valorDe = agendamentoViewModel::valorDe,
-                    valorTotal = agendamentoViewModel.valorTotal(),
                     observacao = fluxo.observacao,
                     passo = if (comCabelo) 4 else 3,
                     totalPassos = if (comCabelo) 4 else 3,
@@ -288,26 +390,37 @@ fun SkalaApp(
                     onAlterarHorario = { nav.popBackStack(Rotas.HORARIO, inclusive = false) },
                     onVoltar = { nav.popBackStack() },
                     onConfirmar = {
+                        val paraCliente = fluxo.paraCliente
                         if (agendamentoViewModel.confirmar(u) != null) {
-                            aviso("Horário confirmado!")
-                            nav.navigate(Rotas.AGENDAMENTOS) {
-                                popUpTo(Rotas.INICIO)
-                                launchSingleTop = true
+                            if (donaReservando && paraCliente != null) {
+                                aviso("Horário reservado para ${paraCliente.nome}")
+                                nav.navigate(Rotas.DONA_AGENDA) {
+                                    popUpTo(Rotas.DONA_AGENDA) { inclusive = true }
+                                    launchSingleTop = true
+                                }
+                            } else {
+                                aviso("Horário confirmado!")
+                                pedirNotificacoesSePreciso()
+                                nav.navigate(Rotas.AGENDAMENTOS) {
+                                    popUpTo(Rotas.INICIO)
+                                    launchSingleTop = true
+                                }
                             }
                         }
                     },
+                    paraCliente = nomeParaCliente,
                 )
             }
             composable(Rotas.AGENDAMENTOS) {
                 val u = usuario ?: return@composable
                 AgendamentosScreen(
-                    agendamentos = agendamentos.filter { it.clienteEmail == u.email },
+                    agendamentos = agendamentos.filter { it.eDe(Cliente(u.nome, u.celular, u.email)) },
                     onRemarcar = {
                         agendamentoViewModel.remarcar(it)
                         nav.navigate(Rotas.HORARIO)
                     },
                     onCancelar = {
-                        repositorio.cancelar(it.id)
+                        agendamentoViewModel.cancelar(it, pelaCliente = true)
                         aviso("Horário cancelado")
                     },
                     onAgendarDeNovo = {
@@ -320,7 +433,9 @@ fun SkalaApp(
                 val u = usuario ?: return@composable
                 PerfilScreen(
                     usuario = u,
+                    salao = dadosSalao,
                     onHistorico = { nav.irParaAba(Rotas.AGENDAMENTOS, Rotas.INICIO) },
+                    onMeusDados = { nav.navigate(Rotas.MEUS_DADOS) },
                     onSair = {
                         authViewModel.sair()
                         agendamentoViewModel.iniciar()
@@ -331,11 +446,45 @@ fun SkalaApp(
 
             // ---------- Dona do salão ----------
             composable(Rotas.DONA_AGENDA) {
-                val hoje = LocalDate.now()
-                AgendaDiaScreen(
-                    dia = dia(hoje),
+                AgendaScreen(
+                    dia = ::dia,
                     agendamentos = agendamentos,
-                    onAjustarDia = { nav.navigate(Rotas.donaDia(hoje)) },
+                    onAjustarDia = { nav.navigate(Rotas.donaDia(it)) },
+                    avisos = avisosDona,
+                    onMarcarAvisosLidos = repositorio::marcarAvisosLidos,
+                )
+            }
+            composable(Rotas.DONA_CLIENTES) {
+                ClientesScreen(
+                    clientes = clientes,
+                    agendamentos = agendamentos,
+                    onNovaCliente = {
+                        erroNovaCliente = null
+                        nav.navigate(Rotas.DONA_NOVA_CLIENTE)
+                    },
+                    onReservar = ::reservarPara,
+                )
+            }
+            composable(Rotas.DONA_NOVA_CLIENTE) {
+                NovaClienteScreen(
+                    erro = erroNovaCliente,
+                    onVoltar = { nav.popBackStack() },
+                    onSalvar = { cliente, reservar ->
+                        repositorio.cadastrarCliente(cliente)
+                            .onSuccess {
+                                erroNovaCliente = null
+                                aviso("${it.nome} cadastrada")
+                                nav.popBackStack()
+                                if (reservar) reservarPara(it)
+                            }
+                            .onFailure { e ->
+                                erroNovaCliente = if (e is ClienteJaCadastrada) {
+                                    "O celular ${formatarCelular(e.existente.celular)} já é de ${e.existente.nome}."
+                                } else {
+                                    "Não foi possível cadastrar. Tente de novo."
+                                }
+                            }
+                    },
                 )
             }
             composable(Rotas.DONA_HORARIOS) {
@@ -343,13 +492,21 @@ fun SkalaApp(
                     dia = ::dia,
                     onEditarDia = { nav.navigate(Rotas.donaDia(it)) },
                     onRepetirSemanas = { d ->
-                        repetirNasProximasSemanas(dia(d))
-                        aviso("Repetido nas próximas 4 semanas")
+                        salvarDias(proximasSemanas(dia(d))) { aviso("Repetido nas próximas 4 semanas") }
                     },
                     onFecharDia = { d ->
-                        repositorio.salvarDia(dia(d).copy(status = StatusDia.FECHADO))
-                        aviso("Dia fechado")
+                        salvarDias(listOf(dia(d).copy(status = StatusDia.FECHADO))) { aviso("Dia fechado") }
                     },
+                    diaCopiado = diaCopiado,
+                    onCopiarDia = { d ->
+                        diaCopiado = dia(d)
+                        aviso("Horário copiado. Escolha o dia e toque em Colar aqui")
+                    },
+                    onColarDia = { d ->
+                        val copia = diaCopiado ?: return@HorariosScreen
+                        salvarDias(listOf(copia.copy(data = d))) { aviso("Horários colados") }
+                    },
+                    onLimparCopia = { diaCopiado = null },
                 )
             }
             composable(Rotas.DONA_DIA) { entrada ->
@@ -358,9 +515,23 @@ fun SkalaApp(
                     diaInicial = dia(data),
                     onVoltar = { nav.popBackStack() },
                     onSalvar = { novo, repetir ->
-                        repositorio.salvarDia(novo)
-                        if (repetir) repetirNasProximasSemanas(novo)
-                        aviso(if (repetir) "Dia salvo e repetido" else "Dia salvo")
+                        salvarDias(listOf(novo) + if (repetir) proximasSemanas(novo) else emptyList()) {
+                            aviso(if (repetir) "Dia salvo e repetido" else "Dia salvo")
+                            nav.popBackStack()
+                        }
+                    },
+                )
+            }
+            composable(Rotas.MEUS_DADOS) {
+                val u = usuario ?: return@composable
+                MeusDadosScreen(
+                    usuario = u,
+                    salao = dadosSalao,
+                    onVoltar = { nav.popBackStack() },
+                    onSalvar = { nome, celular, salao ->
+                        authViewModel.atualizarDados(nome, celular)
+                        salao?.let(repositorio::salvarDadosSalao)
+                        aviso("Dados salvos")
                         nav.popBackStack()
                     },
                 )
@@ -369,7 +540,9 @@ fun SkalaApp(
                 val u = usuario ?: return@composable
                 PerfilScreen(
                     usuario = u,
+                    salao = dadosSalao,
                     onHistorico = { nav.irParaAba(Rotas.DONA_HORARIOS, Rotas.DONA_AGENDA) },
+                    onMeusDados = { nav.navigate(Rotas.MEUS_DADOS) },
                     onSair = {
                         authViewModel.sair()
                         nav.irLimpandoPilha(Rotas.LOGIN)
@@ -377,5 +550,16 @@ fun SkalaApp(
                 )
             }
         }
+    }
+
+    mudancaPendente?.let { m ->
+        AvisoConflitoDialog(
+            conflitos = m.conflitos,
+            onAjustar = { mudancaPendente = null },
+            onSalvarMesmoAssim = {
+                mudancaPendente = null
+                m.salvar()
+            },
+        )
     }
 }

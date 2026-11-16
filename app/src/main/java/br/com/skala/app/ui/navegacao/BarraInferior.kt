@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.automirrored.outlined.List
@@ -31,6 +32,7 @@ val itensCliente = listOf(
 
 val itensDona = listOf(
     ItemBarra(Rotas.DONA_AGENDA, "Agenda", Icons.AutoMirrored.Outlined.List),
+    ItemBarra(Rotas.DONA_CLIENTES, "Clientes", Icons.Outlined.Group),
     ItemBarra(Rotas.DONA_HORARIOS, "Horários", Icons.Outlined.CalendarMonth),
     ItemBarra(Rotas.DONA_PERFIL, "Perfil", Icons.Outlined.Person),
 )

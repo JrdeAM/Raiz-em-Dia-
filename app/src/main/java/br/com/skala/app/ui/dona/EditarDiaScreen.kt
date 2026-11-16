@@ -1,5 +1,9 @@
 package br.com.skala.app.ui.dona
 
+import androidx.compose.ui.tooling.preview.Preview
+import br.com.skala.app.ui.theme.SkalaTheme
+import br.com.skala.app.data.FakeSalaoRepository
+import java.time.LocalDate
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -295,4 +299,13 @@ private fun RelogioDialog(titulo: String, inicial: LocalTime, onCancelar: () -> 
         dismissButton = { TextButton(onClick = onCancelar) { Text("Cancelar", color = SkalaColors.Wine) } },
         containerColor = SkalaColors.Ivory,
     )
+}
+
+// ---------- previews (dados de teste do FakeSalaoRepository) ----------
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Editar dia")
+@Composable
+private fun EditarDiaScreenPreview() {
+    SkalaTheme {
+        EditarDiaScreen(diaInicial = FakeSalaoRepository.dia(LocalDate.now()), onVoltar = {}, onSalvar = { _, _ -> })
+    }
 }

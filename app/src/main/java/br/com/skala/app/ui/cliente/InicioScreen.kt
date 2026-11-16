@@ -1,5 +1,8 @@
 package br.com.skala.app.ui.cliente
 
+import androidx.compose.ui.tooling.preview.Preview
+import br.com.skala.app.ui.theme.SkalaTheme
+import br.com.skala.app.data.FakeSalaoRepository
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -187,5 +190,21 @@ private fun CartaoProximo(ag: Agendamento, onVerHorarios: () -> Unit) {
         TextButton(onClick = onVerHorarios, contentPadding = ButtonDefaults.TextButtonContentPadding) {
             Text("Ver meus horários", color = Color.White, fontSize = 13.sp, textDecoration = TextDecoration.Underline)
         }
+    }
+}
+
+// ---------- previews (dados de teste do FakeSalaoRepository) ----------
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Início")
+@Composable
+private fun InicioScreenPreview() {
+    SkalaTheme {
+        InicioScreen(
+            nome = "Maria Clara",
+            proximo = FakeSalaoRepository.agendamentos.value.firstOrNull { it.id == "a1" },
+            onAgendar = {},
+            onAtalho = { _, _ -> },
+            onVerHorarios = {},
+            onPerfil = {},
+        )
     }
 }

@@ -1,5 +1,8 @@
 package br.com.skala.app.ui.dona
 
+import androidx.compose.ui.tooling.preview.Preview
+import br.com.skala.app.ui.theme.SkalaTheme
+import br.com.skala.app.data.FakeSalaoRepository
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -21,7 +24,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.EventRepeat
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,12 +52,17 @@ import br.com.skala.app.data.StatusDia
 import br.com.skala.app.ui.components.Cartao
 import br.com.skala.app.ui.components.SecondaryButton
 import br.com.skala.app.ui.components.TituloDaTela
+import br.com.skala.app.ui.components.diaSemanaCurto
 import br.com.skala.app.ui.components.mesAno
 import br.com.skala.app.ui.components.texto
 import br.com.skala.app.ui.components.textoLongo
 import br.com.skala.app.ui.theme.SkalaColors
 import br.com.skala.app.ui.theme.TituloSecao
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+private val formatoDiaMes = DateTimeFormatter.ofPattern("d/MM")
 
 /**
  * Calendário do mês em que a dona marca cada dia como aberto, fechado ou a definir.
@@ -62,6 +74,11 @@ fun HorariosScreen(
     onEditarDia: (LocalDate) -> Unit,
     onRepetirSemanas: (LocalDate) -> Unit,
     onFecharDia: (LocalDate) -> Unit,
+    /** Dia cujos horários a dona copiou, esperando para ser colado em outra data. */
+    diaCopiado: DiaFuncionamento?,
+    onCopiarDia: (LocalDate) -> Unit,
+    onColarDia: (LocalDate) -> Unit,
+    onLimparCopia: () -> Unit,
 ) {
     val hoje = LocalDate.now()
     var mesBase by rememberSaveable { mutableStateOf(hoje.withDayOfMonth(1).toEpochDay()) }
@@ -156,14 +173,60 @@ fun HorariosScreen(
             }
         }
 
-        if (!sel.isBefore(hoje)) {
+        // Copiar funciona em qualquer dia definido (até no passado); colar só de hoje em diante.
+        val podeCopiar = diaSel.status != StatusDia.A_DEFINIR
+        val podeColar = diaCopiado != null && !sel.isBefore(hoje) && diaCopiado.data != sel
+        if (podeCopiar || podeColar) {
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SecondaryButton("Repetir 4 semanas", onClick = { onRepetirSemanas(sel) }, icon = Icons.Outlined.ContentCopy, modifier = Modifier.weight(1f))
-                SecondaryButton("Fechar este dia", onClick = { onFecharDia(sel) }, icon = Icons.Outlined.Block, modifier = Modifier.weight(1f))
+                if (podeCopiar) SecondaryButton("Copiar horário", onClick = { onCopiarDia(sel) }, icon = Icons.Outlined.ContentCopy, modifier = Modifier.weight(1f))
+                if (podeColar) SecondaryButton("Colar aqui", onClick = { onColarDia(sel) }, icon = Icons.Outlined.ContentPaste, modifier = Modifier.weight(1f))
+            }
+        }
+        if (diaCopiado != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp).background(SkalaColors.Blush, RoundedCornerShape(14.dp)).padding(start = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Copiado: ${diaCopiado.data.diaSemanaCurto()}, ${diaCopiado.data.format(formatoDiaMes)} · ${diaCopiado.resumoHorario()}",
+                    fontSize = 12.sp,
+                    color = SkalaColors.RoseLink,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onLimparCopia) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Descartar dia copiado", tint = SkalaColors.RoseLink, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
+        if (!sel.isBefore(hoje)) {
+            Spacer(Modifier.height(10.dp))
+            // O texto de repetir é longo demais para meia largura: cada botão ocupa a linha toda.
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SecondaryButton(textoRepetir(sel), onClick = { onRepetirSemanas(sel) }, icon = Icons.Outlined.EventRepeat)
+                SecondaryButton("Fechar este dia", onClick = { onFecharDia(sel) }, icon = Icons.Outlined.Block)
             }
         }
     }
+}
+
+/** "Repetir nas próximas 4 sextas" / "Repetir nos próximos 4 sábados". */
+private fun textoRepetir(data: LocalDate): String = when (data.dayOfWeek) {
+    DayOfWeek.MONDAY -> "Repetir nas próximas 4 segundas"
+    DayOfWeek.TUESDAY -> "Repetir nas próximas 4 terças"
+    DayOfWeek.WEDNESDAY -> "Repetir nas próximas 4 quartas"
+    DayOfWeek.THURSDAY -> "Repetir nas próximas 4 quintas"
+    DayOfWeek.FRIDAY -> "Repetir nas próximas 4 sextas"
+    DayOfWeek.SATURDAY -> "Repetir nos próximos 4 sábados"
+    DayOfWeek.SUNDAY -> "Repetir nos próximos 4 domingos"
+}
+
+/** "09:00–12:00, 14:00–19:00" ou "Fechado". */
+private fun DiaFuncionamento.resumoHorario(): String = when (status) {
+    StatusDia.ABERTO -> faixas.joinToString(", ") { "${it.inicio.texto()}–${it.fim.texto()}" }
+    StatusDia.FECHADO -> "Fechado"
+    StatusDia.A_DEFINIR -> "A definir"
 }
 
 @Composable
@@ -243,5 +306,40 @@ private fun Seta(esquerda: Boolean, onClick: () -> Unit) {
                 tint = SkalaColors.Wine,
             )
         }
+    }
+}
+
+// ---------- previews (dados de teste do FakeSalaoRepository) ----------
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Horários")
+@Composable
+private fun HorariosScreenPreview() {
+    SkalaTheme {
+        HorariosScreen(
+            dia = FakeSalaoRepository::dia,
+            onEditarDia = {},
+            onRepetirSemanas = {},
+            onFecharDia = {},
+            diaCopiado = null,
+            onCopiarDia = {},
+            onColarDia = {},
+            onLimparCopia = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Horários · com dia copiado")
+@Composable
+private fun HorariosScreenCopiadoPreview() {
+    SkalaTheme {
+        HorariosScreen(
+            dia = FakeSalaoRepository::dia,
+            onEditarDia = {},
+            onRepetirSemanas = {},
+            onFecharDia = {},
+            diaCopiado = FakeSalaoRepository.dia(LocalDate.now().minusDays(1)),
+            onCopiarDia = {},
+            onColarDia = {},
+            onLimparCopia = {},
+        )
     }
 }

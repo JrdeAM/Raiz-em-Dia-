@@ -93,11 +93,13 @@ fun LoginScreen(
         )
 
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            // Altura visível da tela: o conteúdo ocupa pelo menos isso e rola quando o teclado abre
+            val alturaTela = maxHeight
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .heightIn(min = maxHeight)
+                    .heightIn(min = alturaTela)
                     .padding(start = 28.dp, end = 28.dp, top = 28.dp, bottom = 12.dp),
             ) {
                 SkalaLogoCompleta(modifier = Modifier.align(Alignment.CenterHorizontally))

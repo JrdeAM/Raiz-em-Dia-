@@ -1,5 +1,8 @@
 package br.com.skala.app.ui.cliente
 
+import androidx.compose.ui.tooling.preview.Preview
+import br.com.skala.app.ui.theme.SkalaTheme
+import br.com.skala.app.data.FakeSalaoRepository
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,9 +41,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import br.com.skala.app.data.FaixaPreco
 import br.com.skala.app.data.Servico
+import br.com.skala.app.data.duracaoMinima
 import br.com.skala.app.data.duracaoTotalMin
+import br.com.skala.app.data.temServicoDeCabelo
 import br.com.skala.app.data.textoDuracao
 import br.com.skala.app.ui.components.CabecalhoPasso
 import br.com.skala.app.ui.components.OpcaoPilula
@@ -49,18 +53,16 @@ import br.com.skala.app.ui.components.TituloDaTela
 import br.com.skala.app.ui.theme.SkalaColors
 import br.com.skala.app.ui.theme.TituloSecao
 
-/** A cliente pode marcar vários serviços para o mesmo horário; o app soma tempo e valor aproximado. */
+/** A cliente pode marcar vários serviços para o mesmo horário; o app soma o tempo. */
 @Composable
 fun ServicosScreen(
     servicos: List<Servico>,
     categoriaInicial: String?,
     selecionadosIniciais: List<String>,
-    /** Valor aproximado de um serviço com preço fixo (os de cabelo dependem do formulário). */
-    precoFixo: (Servico) -> FaixaPreco?,
-    /** Soma aproximada dos marcados, quando já dá para calcular sem o formulário do cabelo. */
-    totalAproximado: (List<Servico>) -> FaixaPreco?,
     onVoltar: () -> Unit,
     onContinuar: (List<Servico>) -> Unit,
+    /** Nome da cliente quando é a dona reservando. */
+    paraCliente: String? = null,
 ) {
     val categorias = listOf("Todos") + servicos.map { it.categoria }.distinct()
     var categoria by rememberSaveable { mutableStateOf(categoriaInicial ?: "Todos") }
@@ -70,7 +72,7 @@ fun ServicosScreen(
     val marcados = servicos.filter { it.id in marcadosIds }
 
     Column(Modifier.fillMaxSize().background(SkalaColors.Ivory).padding(horizontal = 24.dp, vertical = 20.dp)) {
-        CabecalhoPasso(passo = 1, total = 4, onVoltar = onVoltar)
+        CabecalhoPasso(passo = 1, total = 4, onVoltar = onVoltar, paraCliente = paraCliente)
         Spacer(Modifier.height(16.dp))
         TituloDaTela("Escolha os serviços")
         Text("Você pode marcar mais de um para o mesmo horário.", fontSize = 13.sp, color = SkalaColors.Muted)
@@ -94,11 +96,11 @@ fun ServicosScreen(
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(s.nome, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = SkalaColors.Wine)
-                            val preco = when {
-                                s.dependeDoCabelo -> "aprox. conforme o cabelo"
-                                else -> precoFixo(s)?.let { "aprox. ${it.texto}" } ?: "valor a combinar"
-                            }
-                            Text("${s.duracaoTexto} · $preco", fontSize = 13.sp, color = SkalaColors.Muted)
+                            Text(
+                                if (s.dependeDoCabelo) "${s.faixaDuracaoTexto} · conforme o cabelo" else s.duracaoTexto,
+                                fontSize = 13.sp,
+                                color = SkalaColors.Muted,
+                            )
                         }
                         Box(
                             Modifier
@@ -126,7 +128,7 @@ fun ServicosScreen(
             val corTexto = if (tem) SkalaColors.OnWineMuted else SkalaColors.Muted
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (tem) "${marcados.size} ${if (marcados.size == 1) "SERVIÇO" else "SERVIÇOS"} · ${textoDuracao(marcados.duracaoTotalMin).uppercase()}"
+                    if (tem) "${marcados.size} ${if (marcados.size == 1) "SERVIÇO" else "SERVIÇOS"}"
                     else "NENHUM SERVIÇO ESCOLHIDO",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -137,14 +139,16 @@ fun ServicosScreen(
                 Text(
                     when {
                         !tem -> "—"
-                        else -> totalAproximado(marcados)?.let { "aprox. ${it.texto}" } ?: "a calcular"
+                        // o tempo exato sai depois do formulário do cabelo
+                        marcados.temServicoDeCabelo -> "a partir de ${textoDuracao(marcados.duracaoMinima)}"
+                        else -> textoDuracao(marcados.duracaoTotalMin)
                     },
-                    style = TituloSecao.copy(fontSize = 20.sp),
+                    style = TituloSecao.copy(fontSize = if (tem && marcados.temServicoDeCabelo) 17.sp else 20.sp),
                     color = if (tem) Color.White else SkalaColors.Muted,
                 )
             }
             Text(
-                "Valor aproximado. O valor final é sempre confirmado no salão, após o procedimento.",
+                "O valor é informado no salão, após a avaliação e a finalização do serviço.",
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
                 color = corTexto,
@@ -155,6 +159,21 @@ fun ServicosScreen(
             text = if (tem) "Continuar" else "Escolha um serviço",
             onClick = { onContinuar(marcados) },
             enabled = tem,
+        )
+    }
+}
+
+// ---------- previews (dados de teste do FakeSalaoRepository) ----------
+@Preview(showBackground = true, widthDp = 390, heightDp = 844, name = "Serviços")
+@Composable
+private fun ServicosScreenPreview() {
+    SkalaTheme {
+        ServicosScreen(
+            servicos = FakeSalaoRepository.servicos,
+            categoriaInicial = null,
+            selecionadosIniciais = listOf("escova"),
+            onVoltar = {},
+            onContinuar = {},
         )
     }
 }

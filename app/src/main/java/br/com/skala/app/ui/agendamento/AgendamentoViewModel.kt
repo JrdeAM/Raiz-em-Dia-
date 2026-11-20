@@ -1,12 +1,13 @@
 package br.com.skala.app.ui.agendamento
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import br.com.skala.app.avisos.AvisosAgendamento
 import br.com.skala.app.avisos.AvisosDoApp
 import br.com.skala.app.data.Agendamento
 import br.com.skala.app.data.Cliente
 import br.com.skala.app.data.DadosCabelo
-import br.com.skala.app.data.FakeSalaoRepository
+import br.com.skala.app.data.Repositorios
 import br.com.skala.app.data.SalaoRepository
 import br.com.skala.app.data.Servico
 import br.com.skala.app.data.Usuario
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -34,13 +36,15 @@ data class AgendamentoUiState(
     val remarcandoId: String? = null,
     /** Preenchido quando é a dona reservando o horário para esta cliente. */
     val paraCliente: Cliente? = null,
+    /** true enquanto o horário está sendo gravado. */
+    val confirmando: Boolean = false,
 ) {
     /** Tempo total estimado com as respostas do cabelo que já existem. */
     val duracaoMin: Int get() = servicos.duracaoPara(cabelo)
 }
 
 class AgendamentoViewModel(
-    val repositorio: SalaoRepository = FakeSalaoRepository,
+    val repositorio: SalaoRepository = Repositorios.salao,
     /** WhatsApp (simulado) para a cliente e lembretes no celular. */
     val avisos: AvisosAgendamento = AvisosDoApp,
 ) : ViewModel() {
@@ -88,40 +92,50 @@ class AgendamentoViewModel(
 
 
     /**
-     * Grava o agendamento (e cancela o antigo, se for remarcação). Retorna null se faltar algo.
-     * Se a dona estiver reservando, o horário fica no nome da cliente escolhida.
+     * Grava o agendamento (e cancela o antigo, se for remarcação). Se a dona estiver reservando,
+     * o horário fica no nome da cliente escolhida. `aoTerminar` recebe o agendamento gravado ou o
+     * erro ([br.com.skala.app.data.HorarioIndisponivel] quando alguém ocupou o horário antes).
      */
-    fun confirmar(usuario: Usuario): Agendamento? {
+    fun confirmar(usuario: Usuario, aoTerminar: (Result<Agendamento>) -> Unit) {
         val e = _estado.value
+        if (e.confirmando) return
         val cliente = e.paraCliente ?: Cliente(usuario.nome, usuario.celular, usuario.email)
-        if (e.servicos.isEmpty()) return null
-        val data = e.data ?: return null
-        val hora = e.hora ?: return null
-        val salao = repositorio.dadosSalao.value
+        if (e.servicos.isEmpty()) return
+        val data = e.data ?: return
+        val hora = e.hora ?: return
         val antigo = e.remarcandoId?.let { id -> repositorio.agendamentos.value.firstOrNull { it.id == id } }
-        if (antigo != null) {
-            repositorio.cancelar(antigo.id)
-            avisos.cancelado(antigo, salao, avisarCliente = false)
-        }
-        val novo = repositorio.agendar(
-            Agendamento(
-                id = "",
-                clienteNome = cliente.nome,
-                clienteEmail = cliente.email,
-                servicos = e.servicos,
-                data = data,
-                inicio = hora,
-                cabelo = e.cabelo.takeIf { e.servicos.temServicoDeCabelo },
-                observacao = e.observacao.trim(),
-                clienteCelular = cliente.celular,
-                reservadoPelaDona = e.paraCliente != null,
-            ),
+        val pedido = Agendamento(
+            id = "",
+            clienteNome = cliente.nome,
+            clienteEmail = cliente.email,
+            servicos = e.servicos,
+            data = data,
+            inicio = hora,
+            cabelo = e.cabelo.takeIf { e.servicos.temServicoDeCabelo },
+            observacao = e.observacao.trim(),
+            clienteCelular = cliente.celular,
+            reservadoPelaDona = e.paraCliente != null,
+            clienteUid = if (e.paraCliente != null) "" else usuario.uid,
         )
-        avisos.confirmado(novo, salao, remarcado = antigo != null)
-        // A dona só é avisada do que a cliente faz pelo app, não do que ela mesma marca
-        if (!usuario.ehDona) avisarDona(if (antigo != null) TipoAvisoDona.REMARCOU else TipoAvisoDona.MARCOU, novo, antigo)
-        _estado.value = AgendamentoUiState()
-        return novo
+        _estado.update { it.copy(confirmando = true) }
+        viewModelScope.launch {
+            // O antigo só é cancelado junto com a gravação do novo: se der errado, a cliente não perde o horário.
+            val resultado = repositorio.agendar(pedido, substituirId = antigo?.id)
+            resultado
+                .onSuccess { novo ->
+                    val salao = repositorio.dadosSalao.value
+                    if (antigo != null) avisos.cancelado(antigo, salao, avisarCliente = false)
+                    avisos.confirmado(novo, salao, remarcado = antigo != null)
+                    // A dona só é avisada do que a cliente faz pelo app, não do que ela mesma marca
+                    if (!usuario.ehDona) avisarDona(if (antigo != null) TipoAvisoDona.REMARCOU else TipoAvisoDona.MARCOU, novo, antigo)
+                    _estado.value = AgendamentoUiState()
+                }
+                .onFailure {
+                    // Horário perdido: limpa a hora para a cliente escolher outra
+                    _estado.update { it.copy(confirmando = false, hora = null) }
+                }
+            aoTerminar(resultado)
+        }
     }
 
     /**
@@ -135,7 +149,6 @@ class AgendamentoViewModel(
     }
 
     private fun avisarDona(tipo: TipoAvisoDona, agendamento: Agendamento, anterior: Agendamento? = null) {
-        repositorio.registrarAvisoDona(tipo, agendamento, anterior)
-        repositorio.avisosDona.value.firstOrNull()?.let(avisos::avisarDona)
+        avisos.avisarDona(repositorio.registrarAvisoDona(tipo, agendamento, anterior))
     }
 }

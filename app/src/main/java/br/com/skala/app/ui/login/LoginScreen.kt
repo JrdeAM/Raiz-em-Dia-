@@ -58,7 +58,8 @@ import br.com.skala.app.ui.theme.TituloTela
 fun LoginScreen(
     onLogin: (email: String, senha: String) -> Unit,
     onCriarConta: () -> Unit,
-    onEsqueciSenha: () -> Unit,
+    /** Recebe o e-mail digitado (pode estar vazio ou inválido). */
+    onEsqueciSenha: (email: String) -> Unit,
     onEntrarComCelular: () -> Unit,
     carregando: Boolean = false,
     erro: String? = null,
@@ -143,7 +144,7 @@ fun LoginScreen(
                 )
                 LinkButton(
                     text = stringResource(R.string.login_esqueci_senha),
-                    onClick = onEsqueciSenha,
+                    onClick = { onEsqueciSenha(email.trim()) },
                     modifier = Modifier.align(Alignment.End),
                 )
                 if (erro != null) {
@@ -178,6 +179,6 @@ fun LoginScreen(
 @Composable
 private fun LoginScreenPreview() {
     SkalaTheme {
-        LoginScreen(onLogin = { _, _ -> }, onCriarConta = {}, onEsqueciSenha = {}, onEntrarComCelular = {})
+        LoginScreen(onLogin = { _, _ -> }, onCriarConta = {}, onEsqueciSenha = { _ -> }, onEntrarComCelular = {})
     }
 }

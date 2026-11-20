@@ -44,7 +44,9 @@ import androidx.navigation.compose.rememberNavController
 import br.com.skala.app.avisos.AvisosDoApp
 import br.com.skala.app.data.Agendamento
 import br.com.skala.app.data.FakeAuthRepository
-import br.com.skala.app.data.FakeSalaoRepository
+import br.com.skala.app.data.HorarioIndisponivel
+import br.com.skala.app.data.Repositorios
+import br.com.skala.app.data.SemConexao
 import br.com.skala.app.data.Cliente
 import br.com.skala.app.data.ClienteJaCadastrada
 import br.com.skala.app.data.DiaFuncionamento
@@ -71,7 +73,9 @@ import br.com.skala.app.ui.dona.NovaClienteScreen
 import br.com.skala.app.ui.dona.formatarCelular
 import br.com.skala.app.ui.dona.EditarDiaScreen
 import br.com.skala.app.ui.dona.HorariosScreen
+import br.com.skala.app.ui.login.LoginCelularScreen
 import br.com.skala.app.ui.login.LoginScreen
+import br.com.skala.app.ui.components.isEmailValido
 import br.com.skala.app.ui.navegacao.BarraInferior
 import br.com.skala.app.ui.navegacao.Rotas
 import br.com.skala.app.ui.navegacao.itensCliente
@@ -86,9 +90,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Lê os dados salvos no celular antes de montar as telas
-        FakeAuthRepository.iniciar(this)
-        FakeSalaoRepository.iniciar(this)
+        // Escolhe o banco (Firebase, ou dados de teste no celular) antes de montar as telas
+        Repositorios.iniciar(this)
         AvisosDoApp.iniciar(this)
         if (savedInstanceState == null) lerIntent(intent)
         // O app é sempre claro, então os ícones da barra de status ficam escuros.
@@ -218,11 +221,13 @@ fun SkalaApp(
 
     // Login ou cadastro deram certo: a dona vai para o painel, a cliente para o Início.
     LaunchedEffect(usuario) {
+        // Passa a acompanhar só os dados que este usuário pode ver (ou limpa tudo ao sair)
+        repositorio.conectar(usuario)
         val rota = nav.currentDestination?.route
         if (usuario != null && !usuario.ehDona) {
             repositorio.registrarClienteDoApp(Cliente(usuario.nome, usuario.celular, usuario.email))
         }
-        if (usuario != null && (rota == Rotas.LOGIN || rota == Rotas.CADASTRO)) {
+        if (usuario != null && (rota == Rotas.LOGIN || rota == Rotas.CADASTRO || rota == Rotas.LOGIN_CELULAR)) {
             nav.irLimpandoPilha(if (usuario.ehDona) Rotas.DONA_AGENDA else Rotas.INICIO)
         }
     }
@@ -270,10 +275,41 @@ fun SkalaApp(
                         authViewModel.limparErro()
                         nav.navigate(Rotas.CADASTRO)
                     },
-                    onEsqueciSenha = { aviso(context.getString(R.string.aviso_em_breve)) },
-                    onEntrarComCelular = { aviso(context.getString(R.string.aviso_em_breve)) },
+                    onEsqueciSenha = { email ->
+                        if (!email.isEmailValido()) {
+                            aviso(context.getString(R.string.senha_informe_email))
+                        } else {
+                            authViewModel.recuperarSenha(email) { ok ->
+                                aviso(context.getString(if (ok) R.string.senha_email_enviado else R.string.erro_generico))
+                            }
+                        }
+                    },
+                    onEntrarComCelular = {
+                        authViewModel.limparErro()
+                        authViewModel.trocarNumero()
+                        nav.navigate(Rotas.LOGIN_CELULAR)
+                    },
+                    carregando = auth.carregando || auth.restaurando,
+                    erro = erro,
+                )
+            }
+            composable(Rotas.LOGIN_CELULAR) {
+                LoginCelularScreen(
+                    etapa = auth.etapaCelular,
+                    celularDoCodigo = auth.celularDoCodigo,
+                    onEnviarCodigo = { celular ->
+                        context.findActivity()?.let { authViewModel.enviarCodigo(celular, it) }
+                    },
+                    onConfirmarCodigo = authViewModel::confirmarCodigo,
+                    onConcluir = authViewModel::concluirCadastroCelular,
+                    onTrocarNumero = authViewModel::trocarNumero,
+                    onVoltar = {
+                        authViewModel.limparErro()
+                        nav.popBackStack()
+                    },
                     carregando = auth.carregando,
                     erro = erro,
+                    codigoTeste = FakeAuthRepository.CODIGO_TESTE.takeIf { !Repositorios.usandoFirebase },
                 )
             }
             composable(Rotas.CADASTRO) {
@@ -389,9 +425,20 @@ fun SkalaApp(
                     onEditarCabelo = { nav.navigate(Rotas.CABELO) },
                     onAlterarHorario = { nav.popBackStack(Rotas.HORARIO, inclusive = false) },
                     onVoltar = { nav.popBackStack() },
+                    confirmando = fluxo.confirmando,
                     onConfirmar = {
                         val paraCliente = fluxo.paraCliente
-                        if (agendamentoViewModel.confirmar(u) != null) {
+                        agendamentoViewModel.confirmar(u) { resultado ->
+                            resultado.onFailure { e ->
+                                aviso(
+                                    when (e) {
+                                        is HorarioIndisponivel -> "Esse horário acabou de ser ocupado. Escolha outro."
+                                        is SemConexao -> context.getString(R.string.erro_sem_conexao)
+                                        else -> context.getString(R.string.erro_generico)
+                                    },
+                                )
+                            }
+                            if (resultado.isFailure) return@confirmar
                             if (donaReservando && paraCliente != null) {
                                 aviso("Horário reservado para ${paraCliente.nome}")
                                 nav.navigate(Rotas.DONA_AGENDA) {
@@ -529,9 +576,10 @@ fun SkalaApp(
                     salao = dadosSalao,
                     onVoltar = { nav.popBackStack() },
                     onSalvar = { nome, celular, salao ->
-                        authViewModel.atualizarDados(nome, celular)
+                        authViewModel.atualizarDados(nome, celular) { ok ->
+                            aviso(if (ok) "Dados salvos" else context.getString(R.string.erro_generico))
+                        }
                         salao?.let(repositorio::salvarDadosSalao)
-                        aviso("Dados salvos")
                         nav.popBackStack()
                     },
                 )
@@ -545,6 +593,7 @@ fun SkalaApp(
                     onMeusDados = { nav.navigate(Rotas.MEUS_DADOS) },
                     onSair = {
                         authViewModel.sair()
+                        agendamentoViewModel.iniciar()
                         nav.irLimpandoPilha(Rotas.LOGIN)
                     },
                 )
@@ -562,4 +611,11 @@ fun SkalaApp(
             },
         )
     }
+}
+
+/** A Activity por trás do Context do Compose (o login pelo celular precisa dela para o SMS). */
+private tailrec fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

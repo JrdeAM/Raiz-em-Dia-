@@ -1,6 +1,7 @@
 package br.com.skala.app.data
 
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 
 data class Servico(
@@ -136,6 +137,8 @@ data class Agendamento(
     val clienteCelular: String = "",
     /** true quando foi a dona que reservou o horário para a cliente. */
     val reservadoPelaDona: Boolean = false,
+    /** Conta (uid do Firebase) de quem marcou pelo app. Vazio quando a dona reservou. */
+    val clienteUid: String = "",
 ) {
     val titulo: String get() = servicos.titulo
     /** Usa as respostas do cabelo salvas no agendamento, então a agenda reserva o tempo certo. */
@@ -178,3 +181,90 @@ data class AvisoDona(
     val quando: java.time.LocalDateTime = java.time.LocalDateTime.now(),
     val lido: Boolean = false,
 )
+
+/**
+ * Agendamentos, avisos e dias de funcionamento são apagados quando passam [DIAS_GUARDADOS] dias
+ * da data deles, para o banco não guardar o que não serve mais.
+ */
+const val DIAS_GUARDADOS = 60L
+
+/** A partir de quando um registro do dia `data` pode ser apagado. */
+fun apagarDepoisDe(data: LocalDate): LocalDateTime = data.plusDays(DIAS_GUARDADOS + 1).atStartOfDay()
+
+/** Um horário já ocupado no dia (só início e fim, sem dados da cliente). */
+data class Ocupacao(val inicio: LocalTime, val fim: LocalTime)
+
+/** De quanto em quanto tempo os horários aparecem para a cliente. */
+private const val PASSO_MIN = 30L
+
+/**
+ * Horários em que cabe um atendimento de `duracaoMin` no `dia`, sem encostar nos horários
+ * `ocupados` (respeitando o intervalo entre clientes) nem nos bloqueios. Horários que já passaram
+ * ficam de fora.
+ */
+fun calcularHorariosLivres(
+    dia: DiaFuncionamento,
+    ocupados: Collection<Ocupacao>,
+    duracaoMin: Int,
+    agora: LocalDateTime = LocalDateTime.now(),
+): List<LocalTime> {
+    val data = dia.data
+    if (dia.status != StatusDia.ABERTO || data.isBefore(agora.toLocalDate())) return emptyList()
+    val intervalo = dia.intervaloMin.toLong()
+    val livres = mutableListOf<LocalTime>()
+    for (faixa in dia.faixas) {
+        var inicio = faixa.inicio
+        while (!inicio.plusMinutes(duracaoMin.toLong()).isAfter(faixa.fim)) {
+            val fim = inicio.plusMinutes(duracaoMin.toLong())
+            val colideAgendamento = ocupados.any { o ->
+                inicio.isBefore(o.fim.plusMinutes(intervalo)) && o.inicio.isBefore(fim.plusMinutes(intervalo))
+            }
+            val colideBloqueio = dia.bloqueios.any { b -> inicio.isBefore(b.fim) && b.inicio.isBefore(fim) }
+            val jaPassou = !LocalDateTime.of(data, inicio).isAfter(agora)
+            if (!colideAgendamento && !colideBloqueio && !jaPassou) livres += inicio
+            inicio = inicio.plusMinutes(PASSO_MIN)
+            if (inicio == LocalTime.MIDNIGHT) break
+        }
+    }
+    return livres
+}
+
+/** O horário escolhido foi ocupado por outra pessoa (ou deixou de existir) antes de confirmar. */
+class HorarioIndisponivel : Exception()
+
+/** Os serviços do salão. Ficam no app (não no banco) porque mudam pouco. */
+object Catalogo {
+    // Tempos estimados (em minutos) dos serviços de cabelo. A dona pode ajustar aqui.
+    // Ordem dos comprimentos: curto, médio, longo, extra longo.
+    private fun tempos(
+        curto: Int, medio: Int, longo: Int, extraLongo: Int,
+        ondulado: Int = 0, cacheado: Int = 0, crespo: Int = 0,
+    ) = TemposCabelo(
+        porComprimento = mapOf(
+            Comprimento.CURTO to curto, Comprimento.MEDIO to medio,
+            Comprimento.LONGO to longo, Comprimento.EXTRA_LONGO to extraLongo,
+        ),
+        extraPorTipo = mapOf(TipoCabelo.ONDULADO to ondulado, TipoCabelo.CACHEADO to cacheado, TipoCabelo.CRESPO to crespo),
+    )
+
+    val servicos = listOf(
+        Servico("corte", "Corte feminino", 30, "Cabelo", dependeDoCabelo = true,
+            tempos = tempos(30, 30, 30, 30, ondulado = 5, cacheado = 15, crespo = 30)),
+        Servico("corte_masculino", "Corte masculino", 30, "Cabelo", dependeDoCabelo = true,
+            tempos = tempos(30, 30, 30, 30, ondulado = 5, cacheado = 15, crespo = 20)),
+        Servico("escova", "Escova", 60, "Cabelo", dependeDoCabelo = true,
+            tempos = tempos(30, 50, 60, 80, ondulado = 10, cacheado = 20, crespo = 30)),
+        Servico("coloracao", "Coloração", 120, "Cabelo", dependeDoCabelo = true,
+            tempos = tempos(90, 120, 150, 180, cacheado = 20, crespo = 30)),
+        Servico("hidratacao", "Hidratação", 40, "Cabelo", dependeDoCabelo = true,
+            tempos = tempos(20, 30, 40, 60, ondulado = 10, cacheado = 20, crespo = 30)),
+        Servico("sobrancelha", "Design de sobrancelha", 30, "Sobrancelha", dependeDoCabelo = false),
+        Servico("maquiagem", "Maquiagem", 60, "Maquiagem", dependeDoCabelo = false),
+    )
+
+    init {
+        // Cada serviço precisa de um id próprio: as telas usam o id para listar e marcar.
+        val repetidos = servicos.groupBy { it.id }.filterValues { it.size > 1 }.keys
+        require(repetidos.isEmpty()) { "Serviços com id repetido: $repetidos" }
+    }
+}

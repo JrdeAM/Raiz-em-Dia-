@@ -1,0 +1,105 @@
+rules_version = '2';
+
+// Regras de acesso do banco do Skala. Publique pelo console do Firebase (Firestore > Regras)
+// ou com `firebase deploy --only firestore:rules`. Estrutura das coleções: MapeamentoFirestore.kt.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    // A dona é a conta cujo uid está em config/salao.donaUid (definido à mão no console).
+    function ehDona() {
+      return logado() && get(/databases/$(database)/documents/config/salao).data.donaUid == request.auth.uid;
+    }
+
+    function emailDoLogin() {
+      return request.auth.token.get('email', '');
+    }
+
+    // Celular confirmado por SMS ("+5511912345678" vira "11912345678"). Vazio para quem entrou por e-mail.
+    function celularDoLogin() {
+      return request.auth.token.get('phone_number', '').replace('^[+]55', '');
+    }
+
+    function meuPerfil() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    match /config/salao {
+      allow read: if logado();
+      // A dona edita nome, endereço e WhatsApp; o donaUid só muda pelo console.
+      allow update: if ehDona() && request.resource.data.donaUid == resource.data.donaUid;
+    }
+
+    match /usuarios/{uid} {
+      // Quem entra pelo celular pode achar a conta de e-mail que usa o mesmo número (para herdar o nome).
+      allow read: if logado() && (
+        request.auth.uid == uid
+        || ehDona()
+        || (celularDoLogin() != '' && resource.data.celular == celularDoLogin())
+      );
+      allow create, update: if logado() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['nome', 'email', 'celular', 'criadoEm'])
+        && request.resource.data.nome is string
+        && request.resource.data.celular is string;
+    }
+
+    // Lista de clientes da dona, uma por celular.
+    match /clientes/{celular} {
+      allow read, delete: if ehDona();
+      // A cliente do app só cria/atualiza a própria ficha (a do celular do perfil dela).
+      allow create, update: if ehDona() || (
+        logado()
+        && celular == meuPerfil().celular
+        && request.resource.data.celular == celular
+      );
+    }
+
+    match /dias/{data} {
+      allow read: if logado();
+      allow write: if ehDona();
+    }
+
+    // Só início e fim de cada horário ocupado, sem dados das clientes.
+    match /ocupacoes/{data} {
+      allow read: if logado();
+      allow create, update: if logado() && request.resource.data.keys().hasOnly(['horarios', 'apagarEm']);
+      allow delete: if ehDona();
+    }
+
+    match /agendamentos/{id} {
+      function ehDaCliente(d) {
+        return d.clienteUid == request.auth.uid
+          || (emailDoLogin() != '' && d.clienteEmail == emailDoLogin())
+          || (celularDoLogin() != '' && d.clienteCelular == celularDoLogin());
+      }
+
+      allow read: if logado() && (ehDona() || ehDaCliente(resource.data));
+
+      allow create: if ehDona() || (
+        logado()
+        && request.resource.data.clienteUid == request.auth.uid
+        && request.resource.data.status == 'CONFIRMADO'
+        && request.resource.data.reservadoPelaDona == false
+      );
+
+      // A cliente só pode cancelar o próprio horário (mudar o status para CANCELADO).
+      allow update: if ehDona() || (
+        logado()
+        && ehDaCliente(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status == 'CANCELADO'
+      );
+
+      allow delete: if ehDona();
+    }
+
+    // Avisos para a dona: qualquer cliente logada cria, só a dona lê.
+    match /avisos/{id} {
+      allow create: if logado();
+      allow read, update, delete: if ehDona();
+    }
+  }
+}

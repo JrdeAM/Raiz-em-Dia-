@@ -53,6 +53,30 @@
     <string name="erro_credenciais">E-mail ou senha incorretos.</string>
     <string name="erro_email_existente">Este e-mail já tem uma conta. Tente entrar.</string>
     <string name="erro_generico">Algo deu errado. Tente de novo.</string>
+    <string name="erro_codigo_invalido">Código incorreto ou vencido. Confira o SMS ou peça outro.</string>
+    <string name="erro_celular_invalido">Confira o número do celular, com DDD.</string>
+    <string name="erro_muitas_tentativas">Muitas tentativas seguidas. Espere alguns minutos e tente de novo.</string>
+    <string name="erro_sem_conexao">Sem internet. Confira a conexão e tente de novo.</string>
+
+    <!-- Login pelo celular -->
+    <string name="celular_titulo">Entrar com o celular</string>
+    <string name="celular_subtitulo">Vamos mandar um código por SMS para confirmar que o número é seu.</string>
+    <string name="celular_enviar_codigo">Enviar código</string>
+    <string name="celular_codigo_titulo">Digite o código</string>
+    <string name="celular_codigo_subtitulo">Enviamos um código de 6 dígitos para %1$s.</string>
+    <string name="celular_campo_codigo">Código do SMS</string>
+    <string name="celular_confirmar">Confirmar</string>
+    <string name="celular_reenviar">Reenviar código</string>
+    <string name="celular_trocar_numero">Usar outro número</string>
+    <string name="celular_nome_titulo">Quase lá!</string>
+    <string name="celular_nome_subtitulo">É a primeira vez deste número por aqui. Como podemos te chamar?</string>
+    <string name="celular_concluir">Concluir cadastro</string>
+    <string name="celular_codigo_teste">Modo de teste: use o código %1$s.</string>
+    <string name="erro_codigo_curto">O código tem 6 dígitos</string>
+
+    <!-- Esqueci a senha -->
+    <string name="senha_informe_email">Digite seu e-mail no campo acima para receber o link.</string>
+    <string name="senha_email_enviado">Se houver conta com esse e-mail, enviamos um link para criar outra senha.</string>
 
     <!-- Home (provisória) -->
     <string name="home_ola">Olá, %1$s!</string>

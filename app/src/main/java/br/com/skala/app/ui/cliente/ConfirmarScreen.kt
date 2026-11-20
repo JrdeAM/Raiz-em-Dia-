@@ -67,6 +67,8 @@ fun ConfirmarScreen(
     onConfirmar: () -> Unit,
     /** Nome da cliente quando é a dona reservando. */
     paraCliente: String? = null,
+    /** true enquanto o horário está sendo gravado (mostra o carregando no botão). */
+    confirmando: Boolean = false,
 ) {
     val minutos = servicos.duracaoPara(cabelo)
     val fim = hora.plusMinutes(minutos.toLong())
@@ -155,6 +157,7 @@ fun ConfirmarScreen(
                 else -> "Confirmar agendamento"
             },
             onClick = onConfirmar,
+            carregando = confirmando,
         )
         TextButton(onClick = onAlterarHorario, modifier = Modifier.fillMaxWidth()) {
             Text("Alterar horário", color = SkalaColors.RoseLink, fontSize = 14.sp, fontWeight = FontWeight.Medium)

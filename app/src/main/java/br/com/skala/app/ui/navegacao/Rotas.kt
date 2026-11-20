@@ -5,6 +5,7 @@ import java.time.LocalDate
 object Rotas {
     const val LOGIN = "login"
     const val CADASTRO = "cadastro"
+    const val LOGIN_CELULAR = "login/celular"
 
     // Cliente
     const val INICIO = "inicio"

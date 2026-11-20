@@ -69,6 +69,7 @@ internal object JsonSalao {
         put("observacao", a.observacao)
         put("status", a.status.name)
         put("reservadoPelaDona", a.reservadoPelaDona)
+        put("clienteUid", a.clienteUid)
     }
 
     /** `servicos`: catálogo atual; serviços que não existem mais são deixados de fora. */
@@ -88,6 +89,7 @@ internal object JsonSalao {
             status = StatusAgendamento.valueOf(o.getString("status")),
             clienteCelular = o.optString("clienteCelular"),
             reservadoPelaDona = o.optBoolean("reservadoPelaDona"),
+            clienteUid = o.optString("clienteUid"),
         )
     }
 

@@ -1,0 +1,28 @@
+{
+  "project_info": {
+    "project_number": "636302719246",
+    "project_id": "skala-a38ca"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:636302719246:android:65d71a22c7e9eed3c5bf5f",
+        "android_client_info": {
+          "package_name": "br.com.skala.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCUL-j586tIuNSYSD3JlGbAXzXTwvufosc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

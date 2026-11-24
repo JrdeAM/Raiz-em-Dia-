@@ -16,10 +16,17 @@ import java.time.LocalDateTime
  */
 interface AvisosAgendamento {
     /** `remarcado`: o horário substitui outro, que já foi cancelado sem mandar mensagem. */
-    fun confirmado(agendamento: Agendamento, salao: DadosSalao, remarcado: Boolean = false)
+    /** `motivo`: escrito pela dona ao remarcar. `anterior`: o horário trocado. Os dois vão na mensagem. */
+    fun confirmado(
+        agendamento: Agendamento,
+        salao: DadosSalao,
+        remarcado: Boolean = false,
+        motivo: String = "",
+        anterior: Agendamento? = null,
+    )
 
-    /** `avisarCliente`: false quando o cancelamento faz parte de uma remarcação. */
-    fun cancelado(agendamento: Agendamento, salao: DadosSalao, avisarCliente: Boolean = true)
+    /** `avisarCliente`: false quando o cancelamento faz parte de uma remarcação. `motivo`: escrito pela dona. */
+    fun cancelado(agendamento: Agendamento, salao: DadosSalao, avisarCliente: Boolean = true, motivo: String = "")
 
     /** Uma cliente marcou, desmarcou ou remarcou pelo app: avisa a dona. */
     fun avisarDona(aviso: AvisoDona)
@@ -35,10 +42,13 @@ object AvisosDoApp : AvisosAgendamento {
         Lembretes.criarCanal(context)
     }
 
-    override fun confirmado(agendamento: Agendamento, salao: DadosSalao, remarcado: Boolean) {
+    override fun confirmado(agendamento: Agendamento, salao: DadosSalao, remarcado: Boolean, motivo: String, anterior: Agendamento?) {
         val ctx = context ?: return
         if (agendamento.clienteCelular.isNotEmpty()) {
-            whatsApp.enviar(celularWhatsApp(agendamento.clienteCelular), MensagensWhatsApp.confirmacao(agendamento, salao, remarcado))
+            whatsApp.enviar(
+                celularWhatsApp(agendamento.clienteCelular),
+                MensagensWhatsApp.confirmacao(agendamento, salao, remarcado, motivo, anterior),
+            )
         }
         if (agendamento.reservadoPelaDona) {
             // O celular é o da dona: os lembretes vão para a cliente por WhatsApp (cobre quem não usa o app).
@@ -55,6 +65,11 @@ object AvisosDoApp : AvisosAgendamento {
      */
     fun sincronizarCliente(cliente: Cliente, agendamentos: List<Agendamento>, salao: DadosSalao) {
         val ctx = context ?: return
+        // Horários cancelados (pela dona, ou trocados numa remarcação) param de avisar neste celular
+        agendamentos
+            .filter { it.eDe(cliente) && it.status == StatusAgendamento.CANCELADO }
+            .filter { Lembretes.temLembretesNoCelular(ctx, it.id) }
+            .forEach { Lembretes.cancelar(ctx, it.id) }
         // No modo de teste os 4 avisos saem em segundos para qualquer horário; sincronizar aqui
         // encheria a tela com os avisos de todos os horários da cliente. Só o horário recém-confirmado avisa.
         if (LEMBRETES_MODO_TESTE) return
@@ -75,11 +90,11 @@ object AvisosDoApp : AvisosAgendamento {
         Log.i("AvisoDona", "[SIMULADO] push para a dona: ${textoAvisoDona(aviso)}")
     }
 
-    override fun cancelado(agendamento: Agendamento, salao: DadosSalao, avisarCliente: Boolean) {
+    override fun cancelado(agendamento: Agendamento, salao: DadosSalao, avisarCliente: Boolean, motivo: String) {
         val ctx = context ?: return
         Lembretes.cancelar(ctx, agendamento.id)
         if (avisarCliente && agendamento.clienteCelular.isNotEmpty()) {
-            whatsApp.enviar(celularWhatsApp(agendamento.clienteCelular), MensagensWhatsApp.cancelamento(agendamento, salao))
+            whatsApp.enviar(celularWhatsApp(agendamento.clienteCelular), MensagensWhatsApp.cancelamento(agendamento, salao, motivo))
         }
     }
 }

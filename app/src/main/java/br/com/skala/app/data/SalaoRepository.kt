@@ -11,13 +11,23 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.UUID
 
-/** Contrato que a API real vai implementar depois. */
+/**
+ * Dados do salão. Há duas versões: [FirebaseSalaoRepository] (banco na nuvem, usado quando o
+ * projeto tem o google-services.json) e [FakeSalaoRepository] (só no celular, para testar).
+ */
 interface SalaoRepository {
     val servicos: List<Servico>
     val dias: StateFlow<Map<LocalDate, DiaFuncionamento>>
+    /** Para a dona: todos. Para a cliente: só os dela. */
     val agendamentos: StateFlow<List<Agendamento>>
     val dadosSalao: StateFlow<DadosSalao>
     val clientes: StateFlow<List<Cliente>>
+
+    /**
+     * Começa a acompanhar os dados que este usuário pode ver (null = ninguém logado, limpa tudo).
+     * Quando é a dona, também apaga o que passou de [DIAS_GUARDADOS] dias.
+     */
+    fun conectar(usuario: Usuario?)
 
     /** Cadastra uma cliente nova. Falha com [ClienteJaCadastrada] se o celular já existir. */
     fun cadastrarCliente(cliente: Cliente): Result<Cliente>
@@ -25,9 +35,9 @@ interface SalaoRepository {
     /** Garante que a cliente que entrou pelo app apareça na lista da dona (atualiza se já existir). */
     fun registrarClienteDoApp(cliente: Cliente)
 
-    /** Avisos para a dona (mais novos primeiro). Com a API, viriam do servidor. */
+    /** Avisos para a dona (mais novos primeiro). */
     val avisosDona: StateFlow<List<AvisoDona>>
-    fun registrarAvisoDona(tipo: TipoAvisoDona, agendamento: Agendamento, anterior: Agendamento? = null)
+    fun registrarAvisoDona(tipo: TipoAvisoDona, agendamento: Agendamento, anterior: Agendamento? = null): AvisoDona
     fun marcarAvisosLidos()
 
     fun salvarDadosSalao(dados: DadosSalao)
@@ -40,7 +50,13 @@ interface SalaoRepository {
      * ocupado (ele é cancelado quando o novo for confirmado).
      */
     fun horariosLivres(data: LocalDate, duracaoMin: Int, ignorarAgendamentoId: String? = null): List<LocalTime>
-    fun agendar(agendamento: Agendamento): Agendamento
+
+    /**
+     * Grava o agendamento, conferindo antes se o horário continua livre (outra cliente pode ter
+     * marcado no mesmo instante): se não estiver, falha com [HorarioIndisponivel].
+     * `substituirId`: remarcação. O horário antigo só é cancelado se o novo for gravado.
+     */
+    suspend fun agendar(agendamento: Agendamento, substituirId: String? = null): Result<Agendamento>
     fun cancelar(id: String)
 }
 
@@ -53,41 +69,7 @@ class ClienteJaCadastrada(val existente: Cliente) : Exception()
  * Precisa de [iniciar] (feito na MainActivity) para ler e gravar no celular.
  */
 object FakeSalaoRepository : SalaoRepository {
-    private const val PASSO_MIN = 30L // de quanto em quanto tempo os horários aparecem para a cliente
-
-    // Tempos estimados (em minutos) dos serviços de cabelo. A dona pode ajustar aqui.
-    // Ordem dos comprimentos: curto, médio, longo, extra longo.
-    private fun tempos(
-        curto: Int, medio: Int, longo: Int, extraLongo: Int,
-        ondulado: Int = 0, cacheado: Int = 0, crespo: Int = 0,
-    ) = TemposCabelo(
-        porComprimento = mapOf(
-            Comprimento.CURTO to curto, Comprimento.MEDIO to medio,
-            Comprimento.LONGO to longo, Comprimento.EXTRA_LONGO to extraLongo,
-        ),
-        extraPorTipo = mapOf(TipoCabelo.ONDULADO to ondulado, TipoCabelo.CACHEADO to cacheado, TipoCabelo.CRESPO to crespo),
-    )
-
-    override val servicos = listOf(
-        Servico("corte", "Corte feminino", 30, "Cabelo", dependeDoCabelo = true,
-            tempos = tempos(30, 30, 30, 30, ondulado = 5, cacheado = 15, crespo = 30)),
-        Servico("corte_masculino", "Corte masculino", 30, "Cabelo", dependeDoCabelo = true,
-            tempos = tempos(30, 30, 30, 30, ondulado = 5, cacheado = 15, crespo = 20)),
-        Servico("escova", "Escova", 60, "Cabelo", dependeDoCabelo = true,
-            tempos = tempos(30, 50, 60, 80, ondulado = 10, cacheado = 20, crespo = 30)),
-        Servico("coloracao", "Coloração", 120, "Cabelo", dependeDoCabelo = true,
-            tempos = tempos(90, 120, 150, 180, cacheado = 20, crespo = 30)),
-        Servico("hidratacao", "Hidratação", 40, "Cabelo", dependeDoCabelo = true,
-            tempos = tempos(20, 30, 40, 60, ondulado = 10, cacheado = 20, crespo = 30)),
-        Servico("sobrancelha", "Design de sobrancelha", 30, "Sobrancelha", dependeDoCabelo = false),
-        Servico("maquiagem", "Maquiagem", 60, "Maquiagem", dependeDoCabelo = false),
-    )
-
-    init {
-        // Cada serviço precisa de um id próprio: as telas usam o id para listar e marcar.
-        val repetidos = servicos.groupBy { it.id }.filterValues { it.size > 1 }.keys
-        require(repetidos.isEmpty()) { "Serviços com id repetido: $repetidos" }
-    }
+    override val servicos = Catalogo.servicos
 
     // O app não mostra valores: o preço é informado no salão, após a avaliação e o serviço.
 
@@ -132,9 +114,11 @@ object FakeSalaoRepository : SalaoRepository {
     private val _avisosDona = MutableStateFlow(avisosDeExemplo())
     override val avisosDona: StateFlow<List<AvisoDona>> = _avisosDona.asStateFlow()
 
-    override fun registrarAvisoDona(tipo: TipoAvisoDona, agendamento: Agendamento, anterior: Agendamento?) {
-        _avisosDona.update { listOf(AvisoDona(UUID.randomUUID().toString(), tipo, agendamento, anterior)) + it }
+    override fun registrarAvisoDona(tipo: TipoAvisoDona, agendamento: Agendamento, anterior: Agendamento?): AvisoDona {
+        val aviso = AvisoDona(UUID.randomUUID().toString(), tipo, agendamento, anterior)
+        _avisosDona.update { listOf(aviso) + it }
         persistir()
+        return aviso
     }
 
     override fun marcarAvisosLidos() {
@@ -149,40 +133,26 @@ object FakeSalaoRepository : SalaoRepository {
         persistir()
     }
 
-    override fun horariosLivres(data: LocalDate, duracaoMin: Int, ignorarAgendamentoId: String?): List<LocalTime> {
-        val dia = dia(data)
-        if (dia.status != StatusDia.ABERTO || data.isBefore(hoje)) return emptyList()
-        val agora = LocalDateTime.now()
-        val ocupados = _agendamentos.value
-            .filter { it.data == data && it.status == StatusAgendamento.CONFIRMADO && it.id != ignorarAgendamentoId }
-            .map { it.inicio to it.fim }
-        val bloqueados = dia.bloqueios.map { it.inicio to it.fim }
-        val intervalo = dia.intervaloMin.toLong()
+    override fun horariosLivres(data: LocalDate, duracaoMin: Int, ignorarAgendamentoId: String?): List<LocalTime> =
+        calcularHorariosLivres(dia(data), ocupados(data, ignorarAgendamentoId), duracaoMin)
 
-        val livres = mutableListOf<LocalTime>()
-        for (faixa in dia.faixas) {
-            var inicio = faixa.inicio
-            while (!inicio.plusMinutes(duracaoMin.toLong()).isAfter(faixa.fim)) {
-                val fim = inicio.plusMinutes(duracaoMin.toLong())
-                val colideAgendamento = ocupados.any { (a, b) ->
-                    inicio.isBefore(b.plusMinutes(intervalo)) && a.isBefore(fim.plusMinutes(intervalo))
-                }
-                val colideBloqueio = bloqueados.any { (a, b) -> inicio.isBefore(b) && a.isBefore(fim) }
-                val jaPassou = data == hoje && !LocalDateTime.of(data, inicio).isAfter(agora)
-                if (!colideAgendamento && !colideBloqueio && !jaPassou) livres += inicio
-                inicio = inicio.plusMinutes(PASSO_MIN)
-                if (inicio == LocalTime.MIDNIGHT) break
-            }
-        }
-        return livres
-    }
+    private fun ocupados(data: LocalDate, ignorarAgendamentoId: String?) = _agendamentos.value
+        .filter { it.data == data && it.status == StatusAgendamento.CONFIRMADO && it.id != ignorarAgendamentoId }
+        .map { Ocupacao(it.inicio, it.fim) }
 
-    override fun agendar(agendamento: Agendamento): Agendamento {
+    override suspend fun agendar(agendamento: Agendamento, substituirId: String?): Result<Agendamento> {
+        val livres = horariosLivres(agendamento.data, agendamento.duracaoMin, substituirId)
+        if (agendamento.inicio !in livres) return Result.failure(HorarioIndisponivel())
         val novo = agendamento.copy(id = UUID.randomUUID().toString())
-        _agendamentos.update { it + novo }
+        _agendamentos.update { lista ->
+            lista.map { if (it.id == substituirId) it.copy(status = StatusAgendamento.CANCELADO) else it } + novo
+        }
         persistir()
-        return novo
+        return Result.success(novo)
     }
+
+    /** Os dados ficam só neste celular, então não há o que acompanhar. */
+    override fun conectar(usuario: Usuario?) = Unit
 
     override fun cancelar(id: String) {
         _agendamentos.update { lista ->
@@ -218,6 +188,17 @@ object FakeSalaoRepository : SalaoRepository {
         JsonSalao.lerSalao(a.ler(K_SALAO))?.let { _dadosSalao.value = it }
         JsonSalao.lerLista(a.ler(K_CLIENTES), JsonSalao::lerCliente)?.let { _clientes.value = it }
         JsonSalao.lerLista(a.ler(K_AVISOS)) { JsonSalao.lerAviso(it, servicos) }?.let { _avisosDona.value = it }
+        apagarAntigos()
+    }
+
+    /** Mesma regra do banco na nuvem: o que passou de [DIAS_GUARDADOS] dias é apagado. */
+    private fun apagarAntigos() {
+        val agora = LocalDateTime.now()
+        fun venceu(data: LocalDate) = !apagarDepoisDe(data).isAfter(agora)
+        _agendamentos.update { lista -> lista.filterNot { venceu(it.data) } }
+        _avisosDona.update { lista -> lista.filterNot { venceu(it.quando.toLocalDate()) } }
+        _dias.update { mapa -> mapa.filterKeys { !venceu(it) } }
+        persistir()
     }
 
     private fun persistir() {

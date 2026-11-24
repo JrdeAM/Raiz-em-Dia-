@@ -6,6 +6,7 @@ import br.com.skala.app.data.FakeSalaoRepository
 import java.time.LocalDate
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,6 +36,8 @@ fun AvisoConflitoDialog(
     conflitos: List<Agendamento>,
     onAjustar: () -> Unit,
     onSalvarMesmoAssim: () -> Unit,
+    /** Remarcar a cliente na hora (abre o fluxo de horário para ela). */
+    onRemarcar: ((Agendamento) -> Unit)? = null,
 ) {
     val variosDias = conflitos.map { it.data }.distinct().size > 1
     val quantas = if (conflitos.size == 1) "1 cliente agendada" else "${conflitos.size} clientes agendadas"
@@ -57,9 +61,14 @@ fun AvisoConflitoDialog(
                             if (variosDias) append("${a.data.diaSemanaCurto()} ${a.data.format(formatoData)} · ")
                             append("${a.inicio.texto()} às ${a.fim.texto()}")
                         }
-                        Column {
-                            Text(a.clienteNome, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = SkalaColors.Wine)
-                            Text("$quando · ${a.titulo}", fontSize = 13.sp, color = SkalaColors.Muted)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(a.clienteNome, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = SkalaColors.Wine)
+                                Text("$quando · ${a.titulo}", fontSize = 13.sp, color = SkalaColors.Muted)
+                            }
+                            if (onRemarcar != null) {
+                                TextButton(onClick = { onRemarcar(a) }) { Text("Remarcar", color = SkalaColors.Rose) }
+                            }
                         }
                     }
                 }

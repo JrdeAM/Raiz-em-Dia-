@@ -67,6 +67,11 @@ fun ConfirmarScreen(
     onConfirmar: () -> Unit,
     /** Nome da cliente quando é a dona reservando. */
     paraCliente: String? = null,
+    /** true enquanto o horário está sendo gravado (mostra o carregando no botão). */
+    confirmando: Boolean = false,
+    /** Só quando a dona remarca: o motivo que vai na mensagem para a cliente (null esconde o campo). */
+    motivo: String? = null,
+    onMotivo: (String) -> Unit = {},
 ) {
     val minutos = servicos.duracaoPara(cabelo)
     val fim = hora.plusMinutes(minutos.toLong())
@@ -78,6 +83,7 @@ fun ConfirmarScreen(
         ) {
             TituloDaTela(
                 when {
+                    paraCliente != null && remarcando -> "Novo horário de $paraCliente"
                     paraCliente != null -> "Horário de $paraCliente"
                     remarcando -> "Confira o novo horário"
                     else -> "Confira seu horário"
@@ -124,6 +130,17 @@ fun ConfirmarScreen(
                 }
             }
 
+            if (motivo != null) {
+                LabeledTextField(
+                    label = "Motivo da remarcação (opcional)",
+                    value = motivo,
+                    onValueChange = onMotivo,
+                    placeholder = "Ex.: imprevisto no salão. Vai na mensagem para a cliente.",
+                    singleLine = false,
+                    minLines = 2,
+                )
+            }
+
             LabeledTextField(
                 label = "Observação (opcional)",
                 value = observacao,
@@ -139,7 +156,7 @@ fun ConfirmarScreen(
                     Spacer(Modifier.width(10.dp))
                     Text(
                         "O valor é informado no salão, após a avaliação e a finalização do serviço. " +
-                            "Cancelamento ou remarcação sem custo até [X] horas antes.",
+                            "Cancelamento ou remarcação preferencialmente até 30 minutos antes do horário.",
                         fontSize = 13.sp,
                         lineHeight = 19.sp,
                         color = SkalaColors.Label,
@@ -150,11 +167,13 @@ fun ConfirmarScreen(
         Spacer(Modifier.height(12.dp))
         PrimaryButton(
             text = when {
+                paraCliente != null && remarcando -> "Confirmar novo horário"
                 paraCliente != null -> "Reservar horário"
                 remarcando -> "Confirmar novo horário"
                 else -> "Confirmar agendamento"
             },
             onClick = onConfirmar,
+            carregando = confirmando,
         )
         TextButton(onClick = onAlterarHorario, modifier = Modifier.fillMaxWidth()) {
             Text("Alterar horário", color = SkalaColors.RoseLink, fontSize = 14.sp, fontWeight = FontWeight.Medium)

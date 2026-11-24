@@ -36,6 +36,8 @@ data class AgendamentoUiState(
     val remarcandoId: String? = null,
     /** Preenchido quando é a dona reservando o horário para esta cliente. */
     val paraCliente: Cliente? = null,
+    /** Motivo que a dona escreveu ao remarcar o horário de uma cliente (vai na mensagem para ela). */
+    val motivo: String = "",
     /** true enquanto o horário está sendo gravado. */
     val confirmando: Boolean = false,
 ) {
@@ -70,6 +72,21 @@ class AgendamentoViewModel(
         )
     }
 
+    /**
+     * A dona remarca o horário de uma cliente (um imprevisto no salão). Mesmo fluxo da remarcação
+     * da cliente: o horário antigo só é cancelado quando o novo for gravado.
+     */
+    fun remarcarParaCliente(agendamento: Agendamento, motivo: String = "") {
+        _estado.value = AgendamentoUiState(
+            servicos = agendamento.servicos,
+            cabelo = agendamento.cabelo ?: DadosCabelo(),
+            observacao = agendamento.observacao,
+            remarcandoId = agendamento.id,
+            paraCliente = Cliente(agendamento.clienteNome, agendamento.clienteCelular, agendamento.clienteEmail),
+            motivo = motivo,
+        )
+    }
+
     /** "Agendar de novo" a partir de um atendimento antigo: mesmos serviços e mesmo cabelo. */
     fun repetir(agendamento: Agendamento) {
         _estado.value = AgendamentoUiState(servicos = agendamento.servicos, cabelo = agendamento.cabelo ?: DadosCabelo())
@@ -89,6 +106,7 @@ class AgendamentoViewModel(
     fun escolherData(data: LocalDate) = _estado.update { it.copy(data = data, hora = null) }
     fun escolherHora(hora: LocalTime) = _estado.update { it.copy(hora = hora) }
     fun atualizarObservacao(texto: String) = _estado.update { it.copy(observacao = texto) }
+    fun atualizarMotivo(texto: String) = _estado.update { it.copy(motivo = texto) }
 
 
     /**
@@ -115,7 +133,8 @@ class AgendamentoViewModel(
             observacao = e.observacao.trim(),
             clienteCelular = cliente.celular,
             reservadoPelaDona = e.paraCliente != null,
-            clienteUid = if (e.paraCliente != null) "" else usuario.uid,
+            // Na remarcação pela dona, o horário continua ligado à conta da cliente (se ela marcou pelo app)
+            clienteUid = if (e.paraCliente != null) antigo?.clienteUid.orEmpty() else usuario.uid,
         )
         _estado.update { it.copy(confirmando = true) }
         viewModelScope.launch {
@@ -125,7 +144,7 @@ class AgendamentoViewModel(
                 .onSuccess { novo ->
                     val salao = repositorio.dadosSalao.value
                     if (antigo != null) avisos.cancelado(antigo, salao, avisarCliente = false)
-                    avisos.confirmado(novo, salao, remarcado = antigo != null)
+                    avisos.confirmado(novo, salao, remarcado = antigo != null, motivo = e.motivo.trim(), anterior = antigo)
                     // A dona só é avisada do que a cliente faz pelo app, não do que ela mesma marca
                     if (!usuario.ehDona) avisarDona(if (antigo != null) TipoAvisoDona.REMARCOU else TipoAvisoDona.MARCOU, novo, antigo)
                     _estado.value = AgendamentoUiState()
@@ -142,9 +161,9 @@ class AgendamentoViewModel(
      * Cancela o horário, apaga os lembretes e avisa a cliente pelo WhatsApp.
      * `pelaCliente`: true quando foi a própria cliente que desmarcou (aí a dona é avisada).
      */
-    fun cancelar(agendamento: Agendamento, pelaCliente: Boolean) {
+    fun cancelar(agendamento: Agendamento, pelaCliente: Boolean, motivo: String = "") {
         repositorio.cancelar(agendamento.id)
-        avisos.cancelado(agendamento, repositorio.dadosSalao.value)
+        avisos.cancelado(agendamento, repositorio.dadosSalao.value, motivo = motivo)
         if (pelaCliente) avisarDona(TipoAvisoDona.DESMARCOU, agendamento)
     }
 

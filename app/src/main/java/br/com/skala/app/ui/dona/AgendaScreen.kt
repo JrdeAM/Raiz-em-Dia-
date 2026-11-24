@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
@@ -58,6 +59,7 @@ import br.com.skala.app.data.AvisoDona
 import br.com.skala.app.data.DiaFuncionamento
 import br.com.skala.app.data.StatusAgendamento
 import br.com.skala.app.data.StatusDia
+import br.com.skala.app.ui.components.LabeledTextField
 import br.com.skala.app.ui.components.OpcaoPilula
 import br.com.skala.app.ui.components.PtBr
 import br.com.skala.app.ui.components.SkalaLogo
@@ -67,13 +69,21 @@ import br.com.skala.app.ui.components.textoLongo
 import br.com.skala.app.ui.theme.SkalaColors
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 private enum class TipoItem { CLIENTE, LIVRE, PAUSA }
 
-private data class ItemAgenda(val hora: LocalTime, val titulo: String, val detalhe: String, val tipo: TipoItem)
+private data class ItemAgenda(
+    val hora: LocalTime,
+    val titulo: String,
+    val detalhe: String,
+    val tipo: TipoItem,
+    /** Só nos itens de cliente: o horário que abre ao tocar. */
+    val agendamento: Agendamento? = null,
+)
 
 private enum class ModoAgenda { DIA, SEMANA }
 
@@ -99,11 +109,16 @@ fun AgendaScreen(
     /** Clientes que marcaram, desmarcaram ou remarcaram pelo app. */
     avisos: List<AvisoDona> = emptyList(),
     onMarcarAvisosLidos: () -> Unit = {},
+    /** Tocar numa cliente na agenda do dia abre o horário, com remarcar e cancelar. */
+    /** O texto é o motivo que a dona escreveu (pode ser vazio); vai na mensagem para a cliente. */
+    onRemarcar: (Agendamento, String) -> Unit = { _, _ -> },
+    onCancelar: (Agendamento, String) -> Unit = { _, _ -> },
 ) {
     val hoje = LocalDate.now()
     var modo by rememberSaveable { mutableStateOf(ModoAgenda.DIA) }
     var selecionadoEpoch by rememberSaveable { mutableStateOf(hoje.toEpochDay()) }
     var escolhendoData by rememberSaveable { mutableStateOf(false) }
+    var abertoId by rememberSaveable { mutableStateOf<String?>(null) }
     val selecionado = LocalDate.ofEpochDay(selecionadoEpoch)
     val inicioSemana = selecionado.inicioDaSemana()
     val semana = (0L..6L).map { inicioSemana.plusDays(it) }
@@ -196,7 +211,7 @@ fun AgendaScreen(
 
         if (modo == ModoAgenda.DIA) {
             item { Spacer(Modifier.height(4.dp)) }
-            conteudoDia(dia(selecionado), agendamentos.doDia(selecionado), hoje, onAjustarDia)
+            conteudoDia(dia(selecionado), agendamentos.doDia(selecionado), hoje, onAjustarDia, onAbrir = { abertoId = it.id })
         } else {
             item {
                 val daSemana = semana.sumOf { agendamentos.doDia(it).size }
@@ -243,6 +258,21 @@ fun AgendaScreen(
             )
         }
     }
+
+    agendamentos.firstOrNull { it.id == abertoId }?.let { a ->
+        DetalheAgendamentoDialog(
+            agendamento = a,
+            onFechar = { abertoId = null },
+            onRemarcar = { motivo ->
+                abertoId = null
+                onRemarcar(a, motivo)
+            },
+            onCancelar = { motivo ->
+                abertoId = null
+                onCancelar(a, motivo)
+            },
+        )
+    }
 }
 
 /** "1 – 7 de novembro" ou "29 de novembro – 5 de dezembro". */
@@ -258,6 +288,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.conteudoDia(
     doDia: List<Agendamento>,
     hoje: LocalDate,
     onAjustarDia: (LocalDate) -> Unit,
+    onAbrir: (Agendamento) -> Unit,
 ) {
     val itens = montarItens(dia, doDia)
     val livres = itens.count { it.tipo == TipoItem.LIVRE }
@@ -316,7 +347,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.conteudoDia(
             )
         }
     }
-    items(itens) { item -> LinhaAgenda(item) }
+    items(itens) { item -> LinhaAgenda(item, onClick = item.agendamento?.let { a -> { onAbrir(a) } }) }
 }
 
 /** Um dia no modo Semana: funcionamento e lista das clientes. Tocar abre o dia. */
@@ -398,13 +429,14 @@ private fun Contador(numero: String, rotulo: String, modifier: Modifier) {
 }
 
 @Composable
-private fun LinhaAgenda(item: ItemAgenda) {
+private fun LinhaAgenda(item: ItemAgenda, onClick: (() -> Unit)? = null) {
     val (fundo, borda, faixa, cor) = when (item.tipo) {
         TipoItem.CLIENTE -> listOf(Color.White, SkalaColors.CardBorder, SkalaColors.Rose, SkalaColors.Wine)
         TipoItem.LIVRE -> listOf(Color.Transparent, Color(0xFFD9C2C8), SkalaColors.RoseLight, SkalaColors.RoseLink)
         TipoItem.PAUSA -> listOf(SkalaColors.Disabled, SkalaColors.Disabled, SkalaColors.Dashed, SkalaColors.Label)
     }
-    Row(Modifier.height(IntrinsicSize.Min)) {
+    val toque = if (onClick != null) Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick) else Modifier
+    Row(Modifier.height(IntrinsicSize.Min).then(toque)) {
         Text(item.hora.texto(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = SkalaColors.Label, modifier = Modifier.width(52.dp).padding(top = 12.dp))
         Box(Modifier.weight(1f).fillMaxHeight()) {
             Column(
@@ -425,11 +457,12 @@ private fun LinhaAgenda(item: ItemAgenda) {
 
 /** Junta clientes, bloqueios, pausas entre faixas e os intervalos livres que sobram em cada faixa. */
 private fun montarItens(dia: DiaFuncionamento, agendamentos: List<Agendamento>): List<ItemAgenda> {
-    if (dia.status != StatusDia.ABERTO) return emptyList()
-    val itens = mutableListOf<ItemAgenda>()
-    agendamentos.forEach {
-        itens += ItemAgenda(it.inicio, it.clienteNome, "${it.titulo} · ${it.duracaoTexto}", TipoItem.CLIENTE)
+    val clientes = agendamentos.map {
+        ItemAgenda(it.inicio, it.clienteNome, "${it.titulo} · ${it.duracaoTexto}", TipoItem.CLIENTE, agendamento = it)
     }
+    // Dia fechado com clientes marcadas (a dona salvou mesmo assim): elas aparecem para serem remarcadas
+    if (dia.status != StatusDia.ABERTO) return clientes.sortedBy { it.hora }
+    val itens = clientes.toMutableList()
     dia.bloqueios.forEach {
         itens += ItemAgenda(it.inicio, "Bloqueado", "${it.motivo.ifBlank { "Horário fechado" }} · até ${it.fim.texto()}", TipoItem.PAUSA)
     }
@@ -456,4 +489,89 @@ private fun AgendaScreenPreview() {
     SkalaTheme {
         AgendaScreen(dia = FakeSalaoRepository::dia, agendamentos = FakeSalaoRepository.agendamentos.value, onAjustarDia = {})
     }
+}
+
+/**
+ * Detalhes de um horário marcado. Remarcar e cancelar só aparecem para horários confirmados que
+ * ainda não passaram. Cancelar pede confirmação.
+ */
+@Composable
+private fun DetalheAgendamentoDialog(
+    agendamento: Agendamento,
+    onFechar: () -> Unit,
+    onRemarcar: (motivo: String) -> Unit,
+    onCancelar: (motivo: String) -> Unit,
+) {
+    var confirmandoCancelamento by rememberSaveable(agendamento.id) { mutableStateOf(false) }
+    var motivo by rememberSaveable(agendamento.id) { mutableStateOf("") }
+    val campoMotivo: @Composable () -> Unit = {
+        LabeledTextField(
+            label = "Motivo (opcional)",
+            value = motivo,
+            onValueChange = { motivo = it },
+            placeholder = "Ex.: imprevisto no salão. Vai na mensagem para a cliente.",
+            singleLine = false,
+            minLines = 2,
+        )
+    }
+    val podeMudar = agendamento.status == StatusAgendamento.CONFIRMADO &&
+        LocalDateTime.of(agendamento.data, agendamento.inicio).isAfter(LocalDateTime.now())
+
+    if (confirmandoCancelamento) {
+        AlertDialog(
+            onDismissRequest = { confirmandoCancelamento = false },
+            title = { Text("Cancelar o horário de ${agendamento.clienteNome}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "O horário fica livre para outras clientes e ${agendamento.clienteNome} é avisada da mudança.",
+                        fontSize = 14.sp,
+                        color = SkalaColors.Muted,
+                    )
+                    campoMotivo()
+                }
+            },
+            confirmButton = { TextButton(onClick = { onCancelar(motivo.trim()) }) { Text("Cancelar horário", color = SkalaColors.RoseLink) } },
+            dismissButton = { TextButton(onClick = { confirmandoCancelamento = false }) { Text("Voltar", color = SkalaColors.Wine) } },
+            containerColor = SkalaColors.Ivory,
+        )
+        return
+    }
+
+    AlertDialog(
+        onDismissRequest = onFechar,
+        title = { Text(agendamento.clienteNome) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "${agendamento.data.textoLongo()} · ${agendamento.inicio.texto()} às ${agendamento.fim.texto()}",
+                    fontSize = 14.sp,
+                    color = SkalaColors.Wine,
+                )
+                Text("${agendamento.titulo} · ${agendamento.duracaoTexto}", fontSize = 14.sp, color = SkalaColors.Muted)
+                if (agendamento.clienteCelular.isNotEmpty()) {
+                    Text("Celular: ${formatarCelular(agendamento.clienteCelular)}", fontSize = 14.sp, color = SkalaColors.Muted)
+                }
+                if (agendamento.observacao.isNotBlank()) {
+                    Text("Observação: ${agendamento.observacao}", fontSize = 14.sp, color = SkalaColors.Muted)
+                }
+                if (podeMudar) campoMotivo()
+                if (!podeMudar) {
+                    Text("Esse horário já passou ou foi cancelado.", fontSize = 13.sp, color = SkalaColors.Muted)
+                }
+            }
+        },
+        confirmButton = {
+            if (podeMudar) TextButton(onClick = { onRemarcar(motivo.trim()) }) { Text("Remarcar", color = SkalaColors.Rose) }
+        },
+        dismissButton = {
+            Row {
+                if (podeMudar) {
+                    TextButton(onClick = { confirmandoCancelamento = true }) { Text("Cancelar horário", color = SkalaColors.RoseLink) }
+                }
+                TextButton(onClick = onFechar) { Text("Fechar", color = SkalaColors.Wine) }
+            }
+        },
+        containerColor = SkalaColors.Ivory,
+    )
 }

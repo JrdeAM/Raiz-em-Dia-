@@ -42,6 +42,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import br.com.skala.app.avisos.AvisosDoApp
+import br.com.skala.app.avisos.WhatsAppSimulado
+import br.com.skala.app.ui.components.WhatsAppSimuladoDialog
 import br.com.skala.app.data.Agendamento
 import br.com.skala.app.data.FakeAuthRepository
 import br.com.skala.app.data.HorarioIndisponivel
@@ -426,8 +428,11 @@ fun SkalaApp(
                     onAlterarHorario = { nav.popBackStack(Rotas.HORARIO, inclusive = false) },
                     onVoltar = { nav.popBackStack() },
                     confirmando = fluxo.confirmando,
+                    motivo = fluxo.motivo.takeIf { donaReservando && fluxo.remarcandoId != null },
+                    onMotivo = agendamentoViewModel::atualizarMotivo,
                     onConfirmar = {
                         val paraCliente = fluxo.paraCliente
+                        val remarcou = fluxo.remarcandoId != null
                         agendamentoViewModel.confirmar(u) { resultado ->
                             resultado.onFailure { e ->
                                 aviso(
@@ -440,7 +445,7 @@ fun SkalaApp(
                             }
                             if (resultado.isFailure) return@confirmar
                             if (donaReservando && paraCliente != null) {
-                                aviso("Horário reservado para ${paraCliente.nome}")
+                                aviso(if (remarcou) "Horário de ${paraCliente.nome} remarcado" else "Horário reservado para ${paraCliente.nome}")
                                 nav.navigate(Rotas.DONA_AGENDA) {
                                     popUpTo(Rotas.DONA_AGENDA) { inclusive = true }
                                     launchSingleTop = true
@@ -499,6 +504,14 @@ fun SkalaApp(
                     onAjustarDia = { nav.navigate(Rotas.donaDia(it)) },
                     avisos = avisosDona,
                     onMarcarAvisosLidos = repositorio::marcarAvisosLidos,
+                    onRemarcar = { a, motivo ->
+                        agendamentoViewModel.remarcarParaCliente(a, motivo)
+                        nav.navigate(Rotas.HORARIO)
+                    },
+                    onCancelar = { a, motivo ->
+                        agendamentoViewModel.cancelar(a, pelaCliente = false, motivo = motivo)
+                        aviso("Horário de ${a.clienteNome} cancelado")
+                    },
                 )
             }
             composable(Rotas.DONA_CLIENTES) {
@@ -601,10 +614,20 @@ fun SkalaApp(
         }
     }
 
+    // WhatsApp ainda simulado: a mensagem que a cliente receberia aparece na tela, uma por vez
+    val whatsSimulados by WhatsAppSimulado.mensagens.collectAsStateWithLifecycle()
+    whatsSimulados.firstOrNull()?.let { m -> WhatsAppSimuladoDialog(m, onOk = WhatsAppSimulado::dispensar) }
+
     mudancaPendente?.let { m ->
         AvisoConflitoDialog(
             conflitos = m.conflitos,
             onAjustar = { mudancaPendente = null },
+            onRemarcar = { a ->
+                // A mudança do dia fica para depois: primeiro a cliente ganha um horário novo
+                mudancaPendente = null
+                agendamentoViewModel.remarcarParaCliente(a)
+                nav.navigate(Rotas.HORARIO)
+            },
             onSalvarMesmoAssim = {
                 mudancaPendente = null
                 m.salvar()
